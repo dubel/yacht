@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.shots/
+*.log
+# source boat model (62 MB) — the game uses the optimised copy in public/assets/boats (npm run optimize-boat)
+assets/swedish_royal_yacht_amadis.glb

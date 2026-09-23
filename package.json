@@ -1,0 +1,26 @@
+{
+  "name": "yacht",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc",
+    "shot": "node tools/shot.mjs",
+    "optimize-boat": "gltf-transform optimize assets/swedish_royal_yacht_amadis.glb public/assets/boats/amadis.glb --texture-compress webp --texture-size 2048 --compress meshopt --flatten false --join false"
+  },
+  "description": "Lagoon sailing game — Three.js + Clearwater-derived water",
+  "dependencies": {
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/cli": "^4.5.0",
+    "@types/three": "^0.186.0",
+    "puppeteer-core": "^24.43.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0"
+  },
+  "private": true,
+  "type": "module"
+}
