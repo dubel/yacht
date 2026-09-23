@@ -15,6 +15,7 @@ const SKY_PATCH_UNIFORMS = /* glsl */ `
 uniform float uSkyScale, uNight, uOvercast, uFlash, uMoonBright, uStarRot;
 uniform vec3 uMoonDir;
 uniform sampler2D uCloudMap;
+uniform float uCloudCover, uCloudBase;
 ${CLOUD_MAP_GLSL}
 float skyHash(vec3 p){ p = fract(p*0.3183099 + 0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x + p.y + p.z)); }
 `;
@@ -73,12 +74,36 @@ const SKY_PATCH_END = /* glsl */ `
 				// behind the volumetric clouds only a heavy deck greys the remaining gaps
 				texColor = mix(texColor, deck, smoothstep(0.55, 0.95, uOvercast));
 				// volumetric clouds (direction map): in front of sky, sun, moon and stars
-				if (direction.y > 0.0) {
+				// under a cloud layer the air near the horizon is in the clouds' shade: the bright Preetham horizon dims
+				texColor *= 1.0 - 0.45*uCloudCover*(1.0 - smoothstep(0.0, 0.3, direction.y));
+				if (direction.y > -0.02) {
 					// 4-tap lookup softens the per-texel march jitter
 					vec2 cuv = cloudMapUV(direction), ct = 0.35/vec2(textureSize(uCloudMap, 0));
 					vec4 cl = 0.25*(texture(uCloudMap, cuv + vec2(ct.x, ct.y)) + texture(uCloudMap, cuv + vec2(-ct.x, ct.y))
 					              + texture(uCloudMap, cuv + vec2(ct.x, -ct.y)) + texture(uCloudMap, cuv - ct));
-					texColor = texColor*cl.a + cl.rgb;
+					// far layer (low elevation → tens of km away, not marched): continue the deck seen a little higher
+					// down to the horizon, then soften it with aerial perspective toward the sky colour
+					float far = smoothstep(9000.0, 32000.0, uCloudBase/max(direction.y, 0.012));
+					// (averaged over a wide slice of azimuth and two heights: the statistics of the layer, not an
+					//  extrusion of individual clouds, which would streak)
+					float yRef = uCloudBase/18000.0;
+					float az = atan(direction.z, direction.x);
+					vec4 ref = vec4(0.0);
+					for (int k = 0; k < 8; k++) {
+						float a = az + (float(k) - 3.5)*0.06;
+						for (int j = 0; j < 2; j++) {
+							float yy = yRef*(1.0 + 0.6*float(j));
+							vec3 dr = normalize(vec3(cos(a), yy, sin(a)));
+							ref += texture(uCloudMap, cloudMapUV(dr));
+						}
+					}
+					ref /= 16.0;
+					vec4 c2 = mix(cl, ref, far);
+					// (the clear-sky colour only exists where there is clear sky: no haze toward it under a deck)
+					// (the clear-sky horizon is very bright in the Preetham model — clamp it, and fade the effect out
+					//  under cover, where that bright clear air simply isn't there)
+					float aerial = 0.35*far*pow(1.0 - uCloudCover, 3.0);
+					texColor = texColor*c2.a + mix(c2.rgb, min(texColor, vec3(1.6))*(1.0 - c2.a), aerial);
 				}
 				texColor += uFlash * vec3(0.5, 0.56, 0.72) * (0.35 + 0.65*smoothstep(-0.1, 0.35, direction.y));
 			}
@@ -117,7 +142,9 @@ export class Environment {
   private envAge = 1e9;
   private readonly lastEnvLight = new THREE.Vector3();
   private readonly horizonRT = new THREE.WebGLRenderTarget(64, 4, { type: THREE.FloatType, depthBuffer: false });
-  private readonly horizonCam = new THREE.PerspectiveCamera(90, 4, 0.1, 5000);
+  // a thin strip 0–5° above the horizon: 4 × 90° wide, 5° tall (a 90° square view would average in the
+  // bright lower half of the sky dome)
+  private readonly horizonCam = new THREE.PerspectiveCamera(5, Math.tan(Math.PI / 4) / Math.tan((2.5 * Math.PI) / 180), 0.1, 5000);
   private horizonPending = false;
   private readonly skyU: Record<string, THREE.IUniform>;
   private pinned: THREE.Vector3 | null = null;
@@ -135,7 +162,7 @@ export class Environment {
     Object.assign(u, {
       uSkyScale: { value: 1 }, uNight: { value: 0 }, uOvercast: { value: 0 }, uFlash: { value: 0 },
       uMoonBright: { value: 0 }, uStarRot: { value: 0 }, uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
-      uCloudMap: { value: null },
+      uCloudMap: { value: null }, uCloudCover: { value: 0 }, uCloudBase: { value: 900 },
     });
     this.skyU = u;
     const fs = this.sky.material.fragmentShader;
@@ -192,6 +219,8 @@ export class Environment {
     u.mieCoefficient.value = 0.004 + 0.003 * gk;
     u.mieDirectionalG.value = 0.82 + 0.07 * gk;
     u.cloudCoverage.value = 0; // Preetham's 2D clouds are replaced by the volumetric layer
+    u.uCloudCover.value = THREE.MathUtils.smoothstep(w.cloudCoverage, 0.15, 0.9);
+    u.uCloudBase.value = w.cloudBase;
     u.time.value += dt * (0.4 + w.wind / 6);
     u.uNight.value = this.night;
     u.uOvercast.value = w.overcast;
@@ -299,7 +328,7 @@ export class Environment {
     const prevTarget = r.getRenderTarget();
     r.setRenderTarget(this.horizonRT);
     for (let i = 0; i < 4; i++) {
-      this.horizonCam.rotation.set(0.035, (i * Math.PI) / 2, 0, 'YXZ');
+      this.horizonCam.rotation.set(0.045, (i * Math.PI) / 2, 0, 'YXZ');
       this.horizonCam.updateMatrixWorld();
       this.horizonRT.viewport.set(i * 16, 0, 16, 4);
       r.setRenderTarget(this.horizonRT);

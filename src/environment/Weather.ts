@@ -33,8 +33,8 @@ export interface WeatherParams {
 }
 
 export const WEATHER: Record<WeatherKind, WeatherParams> = {
-  clear:  { cloudCoverage: 0.21, cloudDensity: 1.9, cloudBase: 950, cloudTop: 2300, cloudType: 0, overcast: 0.0,  rain: 0,    lightning: 0,   wind: 6.5, gustiness: 0.2,  waves: 1.0, chop: 1.0,  fog: 0.0011, whitecaps: 0 },
-  cloudy: { cloudCoverage: 0.5, cloudDensity: 1.8, cloudBase: 800, cloudTop: 2700, cloudType: 0.2, overcast: 0.35, rain: 0,    lightning: 0,   wind: 8,   gustiness: 0.28, waves: 1.2, chop: 1.15, fog: 0.0016, whitecaps: 0.05 },
+  clear:  { cloudCoverage: 0.17, cloudDensity: 1.3, cloudBase: 950, cloudTop: 2300, cloudType: 0, overcast: 0.0,  rain: 0,    lightning: 0,   wind: 6.5, gustiness: 0.2,  waves: 1.0, chop: 1.0,  fog: 0.0011, whitecaps: 0 },
+  cloudy: { cloudCoverage: 0.48, cloudDensity: 1.7, cloudBase: 800, cloudTop: 2700, cloudType: 0.2, overcast: 0.35, rain: 0,    lightning: 0,   wind: 8,   gustiness: 0.28, waves: 1.2, chop: 1.15, fog: 0.0016, whitecaps: 0.05 },
   rain:   { cloudCoverage: 0.8, cloudDensity: 1.6, cloudBase: 600, cloudTop: 3000, cloudType: 0.55, overcast: 0.65, rain: 0.6,  lightning: 0,   wind: 9,   gustiness: 0.3,  waves: 1.35, chop: 1.3, fog: 0.0034, whitecaps: 0.12 },
   storm:  { cloudCoverage: 0.9, cloudDensity: 1.5, cloudBase: 500, cloudTop: 6500, cloudType: 1.0, overcast: 0.93, rain: 1.0,  lightning: 7,   wind: 12,  gustiness: 0.45, waves: 1.8, chop: 1.55, fog: 0.0048, whitecaps: 0.4 },
   gale:   { cloudCoverage: 0.8, cloudDensity: 1.3, cloudBase: 500, cloudTop: 3200, cloudType: 0.5, overcast: 0.8, rain: 0.45, lightning: 1.5, wind: 16.5, gustiness: 0.4, waves: 2.6, chop: 1.9, fog: 0.0042, whitecaps: 0.85 },

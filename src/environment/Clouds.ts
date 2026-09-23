@@ -172,7 +172,8 @@ float cloudDensity(vec3 p, float h, bool detail){
   vec3 q = p + vec3(uWindOffset.x, 0.0, uWindOffset.y);
   // large-scale coverage variation: clumps and clear gaps drifting with the wind
   float covMap = texture(uShape, vec3(q.x/42000.0, 0.31, q.z/42000.0)).r;
-  float cov = clamp(uCoverage + 0.45*(covMap - 0.5), 0.0, 1.0);
+  // scaled (not offset) by the coverage map: a clear sky stays clear with the odd cloud, a storm keeps gaps
+  float cov = clamp(uCoverage*(0.45 + 1.1*covMap), 0.0, 1.0);
   // skew upward toward the wind so towers lean
   q.xz += h*h*vec2(260.0, 90.0);
   q.y += uTime*3.0;
@@ -243,7 +244,8 @@ void main(){
   vec3 rd = normalize(vec3(2.0*p.x, 1.0 - r2, 2.0*p.y));
   vec3 ro = vec3(uCam.x, max(uCam.y, 1.0), uCam.z);
   float t0 = shellT(ro.y, rd.y, uBase), t1 = shellT(ro.y, rd.y, uTop);
-  if (t1 <= t0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  // beyond ~40 km the sky shader renders the layer as haze (see Environment); don't march it
+  if (t1 <= t0 || t0 > 40000.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
   t1 = min(t1, t0 + 24000.0);
   float horizon = 1.0 - rd.y;
   int N = int(mix(36.0, 56.0, horizon*horizon));
@@ -275,10 +277,11 @@ void main(){
         ls *= 1.9;
       }
       float sigma = 0.045;
-      float Tl = exp(-sigma*od) + 0.28*exp(-sigma*od*0.25);     // single + cheap multiple scattering
+      float Tl = exp(-sigma*od) + 0.5*exp(-sigma*od*0.18);      // single + cheap multiple scattering
       float powder = 1.0 - exp(-2.0*sigma*dens*120.0);
       vec3 sun = uLightColor*Tl*phase*mix(0.6, 1.0, powder)*6.2832;
-      vec3 amb = uAmbient*mix(0.3, 1.3, h*h);
+      // sky light from above, plus sunlight bounced off the bright lagoon onto the cloud bases
+      vec3 amb = uAmbient*mix(0.6, 1.3, h) + uLightColor*0.035*(1.0 - h);
       // lightning lights the cloud from inside
       vec3 flash = vec3(0.7, 0.75, 1.0)*uFlash*14.0*exp(-od*0.004)*pow(max(dot(rd, uFlashDir), 0.0), 6.0);
       vec3 S = (sun + amb + flash)*sigma*dens;
@@ -288,11 +291,7 @@ void main(){
       T *= Ts;
     }
   }
-  // aerial perspective: far clouds dissolve into the sky near the horizon
-  float dist = tHit > 0.0 ? tHit : t1;
-  float fade = smoothstep(6000.0, 20000.0, dist);
-  L *= 1.0 - fade;
-  T = mix(T, 1.0, fade);
+  // aerial perspective of the far layer is applied by the sky shader, which knows the sky colour
   o = vec4(L, T);
 }`,
       { ...shared, uFrame: { value: 0 } },
