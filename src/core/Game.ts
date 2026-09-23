@@ -13,6 +13,9 @@ import { UnderwaterParticles } from '../render/water/UnderwaterParticles';
 import { Environment } from '../environment/Environment';
 import { Wind } from '../environment/Wind';
 import { WaveField } from '../environment/WaveField';
+import { GameTime } from '../environment/GameTime';
+import { Weather } from '../environment/Weather';
+import { WeatherFX } from '../environment/WeatherFX';
 import { Terrain } from '../world/Terrain';
 import { Vegetation } from '../world/Vegetation';
 import { Mission } from '../gameplay/Mission';
@@ -21,6 +24,7 @@ import { BoatPhysics } from '../physics/BoatPhysics';
 import { SailingCamera } from '../camera/SailingCamera';
 import { DebugUI } from '../debug/DebugUI';
 import { Hud } from '../debug/Hud';
+import { AudioSystem } from '../audio/AudioSystem';
 
 const START_BEARING = THREE.MathUtils.degToRad(190);
 const VIEW_IDS: Record<ViewMode, number> = { final: 0, normals: 1, caustics: 2, reflection: 3, depth: 4, ripples: 5, fft: 6 };
@@ -30,6 +34,8 @@ export class Game {
   readonly scene = new THREE.Scene();
   readonly input: Input;
   readonly wind = new Wind();
+  readonly clock = new GameTime(Config.startTime, Config.dayLengthSec);
+  readonly weather = new Weather(Config.weather && Config.weather !== 'auto' ? Config.weather : 'clear', !Config.weather || Config.weather === 'auto');
   readonly waves: WaveField;
   readonly env: Environment;
   readonly blit: Blitter;
@@ -40,6 +46,7 @@ export class Game {
   readonly pipeline: Pipeline;
   readonly boat = new Boat();
   readonly particles = new UnderwaterParticles();
+  readonly weatherFx = new WeatherFX();
   terrain!: Terrain;
   vegetation!: Vegetation;
   mission!: Mission;
@@ -47,6 +54,9 @@ export class Game {
   readonly cam: SailingCamera;
   readonly debug: DebugUI;
   readonly hud: Hud;
+  readonly audio = new AudioSystem();
+  private shore = 0;
+  private shoreT = 0;
 
   view: ViewMode = (VIEW_MODES as string[]).includes(Config.view) ? (Config.view as ViewMode) : 'final';
   quality: number;
@@ -70,11 +80,14 @@ export class Game {
 
     this.input = new Input(canvas);
     this.blit = new Blitter(this.renderer);
+    this.wind.baseSpeed = this.weather.p.wind;
+    this.wind.gustiness = this.weather.p.gustiness;
     this.wind.update(0);
     const windToward = Math.atan2(this.wind.dir.z, this.wind.dir.x);
     this.waves = new WaveField(windToward);
     this.env = new Environment(this.renderer, this.scene);
-    this.env.setSun(Config.sunElevationDeg, Config.sunAzimuthDeg);
+    if (Config.sunOverride) this.env.pinSun(Config.sunOverride.elevation, Config.sunOverride.azimuth);
+    this.env.update(0, this.clock, this.weather);
     this.scene.fog = new THREE.FogExp2(this.env.fogColor, this.env.fogDensity);
 
     this.spectrum = new WaterSpectrum(this.blit, Config.fft.N, Config.fft.L, Config.fft.targetSlope, [this.wind.dir.x, this.wind.dir.z]);
@@ -91,8 +104,15 @@ export class Game {
     uw.uCausShift.value = this.caustics.shift;
     uw.uCausPatch.value = this.caustics.patch;
     uw.uCausDepth.value = this.caustics.depth;
-    uw.uSunW.value = this.env.sunDir;
-    this.scene.add(this.particles.points);
+    uw.uSunW.value = this.env.lightDir;
+    this.scene.add(this.particles.points, this.weatherFx.group);
+    this.weather.onStrike = (s) => {
+      this.weatherFx.onStrike(s, this.cam.camera.position);
+      // pan the thunder by where the strike is relative to the view direction
+      const f = this.cam.camera.getWorldDirection(new THREE.Vector3());
+      const fl = Math.hypot(f.x, f.z) || 1;
+      this.audio.thunder({ distance: s.distance, pan: (Math.sin(s.angle) * -f.z + Math.cos(s.angle) * f.x) / fl });
+    };
 
     this.cam = new SailingCamera(innerWidth / innerHeight);
     this.debug = new DebugUI(this);
@@ -157,6 +177,10 @@ export class Game {
     if (inp.wasPressed('KeyR')) this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, 0);
     if (inp.wasPressed('KeyH')) this.hud.toggleHelp();
     if (inp.wasPressed('KeyV')) this.cam.toggleDive();
+    if (inp.wasPressed('KeyN')) this.weather.cycle();
+    if (inp.wasPressed('KeyM')) this.audio.toggleMute();
+    if (inp.wasPressed('BracketRight')) this.clock.advance(1);
+    if (inp.wasPressed('BracketLeft')) this.clock.advance(-1);
   }
 
   frame(now: number): void {
@@ -168,12 +192,26 @@ export class Game {
 
     this.renderer.info.reset();
     this.handleKeys();
+    // ---- time of day + weather drive everything below ----
+    const realDt = Config.fixedTime !== null ? 0 : dt;
+    this.clock.update(realDt);
+    this.weather.update(Config.fixedTime !== null ? 1 / 60 : dt);
+    const wp = this.weather.p;
+    this.wind.baseSpeed = wp.wind;
+    this.wind.gustiness = wp.gustiness;
     this.wind.update(t);
+    if (Math.abs(this.waves.intensity - wp.waves) > 0.005) { this.waves.intensity = wp.waves; this.waves.pack(); }
+    this.env.update(Config.fixedTime !== null ? 1 / 60 : dt, this.clock, this.weather);
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.copy(this.env.fogColor);
+    fog.density = this.env.fogDensity;
+    this.pipeline.post.exposure = this.env.exposure;
 
     // --- simulation ---
     this.physics.update(stepDt, t, this.input);
     const body = this.physics;
     body.applyVisuals(this.boat, t);
+    this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t);
     this.mission.update(stepDt, t, body.origin, this.waves);
 
     // --- camera ---
@@ -192,25 +230,39 @@ export class Game {
     u.uWaveTime.value = t;
     u.uTime.value = t;
     u.uView.value = VIEW_IDS[this.view];
-    u.uSunDir.value.copy(this.env.sunDir);
+    u.uSunDir.value.copy(this.env.lightDir);
     u.uSunRad.value.copy(this.env.sunRadiance);
+    u.uSkyIrr.value.copy(this.env.skyIrradiance);
+    u.uChop.value = wp.chop;
+    u.uWhitecaps.value = wp.whitecaps;
+    u.uRain.value = wp.rain;
     u.uFogColor.value.copy(this.env.fogColor);
     u.uFogDensity.value = this.env.fogDensity;
 
     this.spectrum.update(t * 0.9);
     this.followV2.set(focus.x + body.velocity.x * 1.5, focus.z + body.velocity.z * 1.5);
     this.ripples.update(stepDt, this.followV2, body.wakeDisturbance());
-    this.caustics.update(this.env.sunDir);
+    this.caustics.update(this.env.lightDir);
 
-    this.env.update(t);
     this.vegetation.update(t, this.wind.dir.x, this.wind.dir.z, this.wind.speed);
     this.env.follow(focus);
 
     if (this.inspect) { this.renderInspect(); return this.input.endFrame(); }
     const cp = this.cam.camera.position;
     const submerged = this.waves.heightAt(cp.x, cp.z, t) - cp.y;
-    this.particles.update(t, cp, submerged > -1.5, this.env.sunRadiance, this.env.sunDir);
+    this.particles.update(t, cp, submerged > -1.5, this.env.sunRadiance, this.env.lightDir);
+    this.weatherFx.update(t, cp, this.weather, this.wind.dir.x * this.wind.speed, this.wind.dir.z * this.wind.speed, this.env.skyIrradiance);
     this.pipeline.render(this.cam.camera, t, this.view, this.caustics.target.texture, submerged);
+
+    // ---- sound ----
+    this.shoreT -= dt;
+    if (this.shoreT <= 0) { this.shoreT = 0.5; this.shore = this.shoreProximity(focus); }
+    const av = body.angVel;
+    this.audio.update(dt, {
+      windSpeed: this.wind.speed, rain: wp.rain, speed: body.speed, motion: Math.hypot(av.x, av.z),
+      luffing: body.luffing, sailsUp: body.sailsUp, submerged, night: this.env.night, shore: this.shore,
+      waves: wp.waves, daylight: 1 - this.env.night,
+    });
 
     this.hud.update(this);
     this.debug.update(dt);
@@ -247,6 +299,19 @@ export class Game {
     this.renderer.setRenderTarget(null);
     this.renderer.autoClear = true;
     this.renderer.render(this.scene, this.inspectCam);
+  }
+
+  /** 0 in open water … 1 next to a beach (for surf / crickets / gulls) */
+  private shoreProximity(p: THREE.Vector3): number {
+    let best = 160;
+    for (const r of [20, 45, 80, 130]) {
+      for (let i = 0; i < 16; i++) {
+        const a = (i / 16) * Math.PI * 2;
+        if (this.terrain.heightAt(p.x + Math.cos(a) * r, p.z + Math.sin(a) * r) > 0.2) { best = Math.min(best, r); break; }
+      }
+      if (best < 160) break;
+    }
+    return THREE.MathUtils.clamp(1 - best / 160, 0, 1);
   }
 
   private adaptQuality(dt: number): void {

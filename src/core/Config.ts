@@ -4,8 +4,13 @@
 //   ?view=caustics    start in a debug view (normals|caustics|reflection|depth|ripples|fft)
 //   ?cam=x,y,z,tx,ty,tz  free camera looking from x,y,z at tx,ty,tz
 //   ?q=0.8            initial render-resolution scale
-//   ?sun=35,200       sun elevation, azimuth (degrees)
+//   ?time=19:40       time of day at start;  ?daylen=7  minutes per day (0 = frozen)
+//   ?weather=storm    clear|cloudy|rain|storm|gale|fog (PL: pogodnie|pochmurno|deszcz|burza|sztorm|mgla|auto)
+//   ?sun=35,200       pin the sun: elevation, azimuth (degrees) — overrides the day cycle
 //   ?speed=4          start the boat moving (m/s), for wake checks
+import { parseTime } from '../environment/GameTime';
+import { parseWeather } from '../environment/Weather';
+
 const Q = new URLSearchParams(location.search);
 
 const num = (k: string): number | null => (Q.has(k) ? parseFloat(Q.get(k)!) : null);
@@ -22,8 +27,14 @@ export const Config = {
   initialQuality: num('q'),
   adaptiveQuality: !Q.has('t') && !Q.has('noadapt'),
 
-  sunElevationDeg: sun?.[0] ?? 28,
-  sunAzimuthDeg: sun?.[1] ?? 215,
+  /** ?sun=el,az pins the sun (debug); otherwise the day/night cycle drives it */
+  sunOverride: sun ? { elevation: sun[0], azimuth: sun[1] } : null,
+  /** ?time=18:30 start time of day */
+  startTime: parseTime(Q.get('time')) ?? 10.5,
+  /** ?daylen=7 minutes per game day (0 = clock stopped) */
+  dayLengthSec: (num('daylen') ?? 7) * 60,
+  /** ?weather=clear|cloudy|rain|storm|gale|fog (or pogodnie|pochmurno|deszcz|burza|sztorm|mgla); fixed unless =auto */
+  weather: parseWeather(Q.get('weather')),
 
   // Water ---------------------------------------------------------------
   fft: {

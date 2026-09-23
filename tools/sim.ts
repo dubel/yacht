@@ -10,7 +10,7 @@ const info = { hullStern: -10.1, hullBow: 7.9, beam: 5.5, keelDepth: 2.25, deckH
 const idle = { axis: () => 0, wasPressed: () => false, isDown: () => false } as unknown as Input;
 
 const wind = new Wind();
-wind.gustiness = 0;
+wind.gustiness = 0; wind.baseSpeed = Number(process.env.WIND ?? 6.5);
 wind.update(0);
 const waves = new WaveField(Math.atan2(wind.dir.z, wind.dir.x));
 const fromDeg = (wind.from * 180) / Math.PI;

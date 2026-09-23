@@ -1,27 +1,107 @@
 import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
+import type { GameTime } from './GameTime';
+import type { Weather } from './Weather';
 
 /**
- * Sun + sky + image-based lighting. One sun direction drives the Preetham sky, the directional light,
- * the water glints and the caustics.
+ * Sun, moon, sky and image-based lighting, driven by GameTime + Weather.
  *
- * Radiometric convention (matches Clearwater): directional light = (1, .9, .74) × 6 so an albedo-a
- * Lambert floor gets a/π·E. The Preetham sky is scaled into the same range.
+ * Radiometric convention (matches Clearwater): the sun at full strength is (1, .9, .74) × 6 so an albedo-a
+ * Lambert surface gets a/π·E. The Preetham sky is in the same range. The shading light (`lightDir`,
+ * `lightRadiance`) is the sun by day and the moon by night — water glints, caustics and shadows follow it.
  */
+const SKY_PATCH_UNIFORMS = /* glsl */ `
+uniform float uSkyScale, uNight, uOvercast, uFlash, uMoonBright, uStarRot;
+uniform vec3 uMoonDir;
+float skyHash(vec3 p){ p = fract(p*0.3183099 + 0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x + p.y + p.z)); }
+`;
+
+const SKY_PATCH_NIGHT = /* glsl */ `
+			// ---- night sky: stars, moon (lit by the real sun direction → correct phase), airglow ----
+			{
+				float night = uNight;
+				vec3 d = direction;
+				texColor += vec3(0.0022, 0.0036, 0.0085) * night * (0.6 + 0.4*smoothstep(0.0, 0.6, d.y)) * (1.0 + 2.5*uMoonBright);
+				if (night > 0.001 && d.y > -0.02) {
+					float c = cos(uStarRot), s = sin(uStarRot);
+					vec3 q = vec3(d.x, d.y*c - d.z*s, d.y*s + d.z*c);
+					vec3 p = q * 260.0;
+					vec3 cell = floor(p);
+					float h = skyHash(cell);
+					if (h > 0.9955) {
+						vec3 o = vec3(skyHash(cell + 1.3), skyHash(cell + 2.7), skyHash(cell + 4.1));
+						float r = length(fract(p) - (0.25 + 0.5*o));
+						float tw = 0.75 + 0.25*sin(time*2.5 + h*400.0);
+						float mag = pow((h - 0.9955)/0.0045, 3.0);
+						vec3 tint = mix(vec3(1.0, 0.85, 0.7), vec3(0.75, 0.85, 1.0), o.x);
+						texColor += tint * smoothstep(0.22, 0.0, r) * (0.05 + 1.6*mag) * tw * night * smoothstep(0.0, 0.18, d.y);
+					}
+				}
+				float md = dot(d, uMoonDir);
+				const float MR = 0.0125;
+				vec3 o = (d - uMoonDir*md) / MR;
+				float r2 = dot(o, o);
+				float vis = smoothstep(-0.03, 0.02, uMoonDir.y);
+				if (md > 0.0 && r2 < 1.2) {
+					vec3 n = normalize(o - uMoonDir*sqrt(max(1.0 - r2, 0.0)));
+					float lit = smoothstep(-0.08, 0.12, dot(n, vSunDirection));
+					float maria = 0.78 + 0.22*smoothstep(0.3, 0.7, skyHash(floor(o*3.0 + 7.0)));
+					vec3 moonC = vec3(1.0, 0.96, 0.88) * (lit*maria*1.9 + 0.02);
+					float disc = smoothstep(1.0, 0.86, r2);
+					texColor = mix(texColor, moonC*(0.35 + 0.65*night), disc*vis);
+				}
+				texColor += vec3(0.55, 0.65, 0.9) * pow(max(md, 0.0), 900.0) * 0.18 * uMoonBright * vis * night;
+			}
+`;
+
+const SKY_PATCH_END = /* glsl */ `
+			// ---- overcast deck + lightning ----
+			{
+				// an overcast deck glows with the sunlight it lets through (≈ E_transmitted / π), keeping
+				// some of the cloud structure; thick storm decks are dark
+				float lum = dot(texColor, vec3(0.2126, 0.7152, 0.0722));
+				float dayLight = smoothstep(-0.12, 0.45, vSunDirection.y);
+				float through = (0.1 + 1.8*dayLight) * (1.04 - uOvercast);
+				vec3 deck = vec3(0.86, 0.9, 0.97) * through * (0.7 + 0.6*clamp(lum/(lum + 1.5), 0.0, 1.0))
+				          * mix(1.0, 0.85 + 0.3*smoothstep(-0.1, 0.5, direction.y), uOvercast)
+				          + vec3(0.002, 0.003, 0.006) * uNight;
+				// the deck hides the bright Mie glow around the sun completely well before full cover
+				texColor = mix(texColor, deck, clamp(uOvercast*1.55, 0.0, 1.0));
+				texColor += uFlash * vec3(0.5, 0.56, 0.72) * (0.35 + 0.65*smoothstep(-0.1, 0.35, direction.y));
+			}
+			gl_FragColor = vec4( texColor * uSkyScale, 1.0 );`;
+
 export class Environment {
-  readonly sunDir = new THREE.Vector3();
-  readonly sunColor = new THREE.Color();
-  /** radiance scale for the sun used by glints (colour × intensity) */
+  /** the sun (may be below the horizon) */
+  readonly sunDir = new THREE.Vector3(0, 1, 0);
+  readonly moonDir = new THREE.Vector3(0, -1, 0);
+  /** direction of the dominant light (sun by day, moon by night) — used by water, caustics, shadows */
+  readonly lightDir = new THREE.Vector3(0, 1, 0);
+  /** colour × intensity of that light, for glints */
   readonly sunRadiance = new THREE.Vector3();
-  readonly sky: Sky;
-  readonly light: THREE.DirectionalLight;
+  /** hemispherical sky irradiance (water in-scatter, foam) */
+  readonly skyIrradiance = new THREE.Vector3(0.43, 0.48, 0.54);
   readonly fogColor = new THREE.Color(0.6, 0.71, 0.82);
   fogDensity = 0.0011;
+  /** suggested post exposure (simple eye adaptation) */
+  exposure = 0.63;
+  /** 0 by day … 1 at full night */
+  night = 0;
+
+  readonly sky: Sky;
+  readonly light: THREE.DirectionalLight;
+  private readonly flashLight = new THREE.HemisphereLight(0xb8c4ff, 0x404858, 0);
 
   private readonly pmrem: THREE.PMREMGenerator;
   private readonly envScene = new THREE.Scene();
   private envRT: THREE.WebGLRenderTarget | null = null;
-  private readonly skyScale = { value: 1.0 };
+  private envAge = 1e9;
+  private readonly lastEnvLight = new THREE.Vector3();
+  private readonly horizonRT = new THREE.WebGLRenderTarget(64, 4, { type: THREE.FloatType, depthBuffer: false });
+  private readonly horizonCam = new THREE.PerspectiveCamera(90, 4, 0.1, 5000);
+  private horizonPending = false;
+  private readonly skyU: Record<string, THREE.IUniform>;
+  private pinned: THREE.Vector3 | null = null;
 
   constructor(private readonly renderer: THREE.WebGLRenderer, private readonly scene: THREE.Scene) {
     this.sky = new Sky();
@@ -31,14 +111,16 @@ export class Environment {
     u.rayleigh.value = 1.1;
     u.mieCoefficient.value = 0.004;
     u.mieDirectionalG.value = 0.82;
-    u.cloudCoverage.value = 0.28;
-    u.cloudDensity.value = 0.35;
-    // Scale the Preetham radiance into our light units + keep it out of three's tone mapping
-    this.sky.material.fragmentShader = this.sky.material.fragmentShader.replace(
-      'gl_FragColor = vec4( texColor, 1.0 );',
-      'gl_FragColor = vec4( texColor * uSkyScale, 1.0 );',
-    ).replace('void main() {', 'uniform float uSkyScale;\nvoid main() {');
-    u.uSkyScale = this.skyScale;
+    Object.assign(u, {
+      uSkyScale: { value: 1 }, uNight: { value: 0 }, uOvercast: { value: 0 }, uFlash: { value: 0 },
+      uMoonBright: { value: 0 }, uStarRot: { value: 0 }, uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
+    });
+    this.skyU = u;
+    const fs = this.sky.material.fragmentShader;
+    this.sky.material.fragmentShader = fs
+      .replace('void main() {', SKY_PATCH_UNIFORMS + '\nvoid main() {')
+      .replace('// Clouds', SKY_PATCH_NIGHT + '\n\t\t\t// Clouds')
+      .replace('gl_FragColor = vec4( texColor, 1.0 );', SKY_PATCH_END);
     this.sky.material.toneMapped = false;
     this.sky.renderOrder = -1;
     scene.add(this.sky);
@@ -53,81 +135,140 @@ export class Environment {
     this.light.shadow.mapSize.set(2048, 2048);
     this.light.shadow.bias = -0.0004;
     this.light.shadow.normalBias = 0.04;
-    scene.add(this.light, this.light.target);
+    scene.add(this.light, this.light.target, this.flashLight);
 
     this.pmrem = new THREE.PMREMGenerator(renderer);
     const envSky = new Sky();
-    envSky.material = this.sky.material; // share uniforms
+    envSky.material = this.sky.material; // same patched material and uniforms
     envSky.scale.setScalar(1000);
     this.envScene.add(envSky);
   }
 
-  setSun(elevationDeg: number, azimuthDeg: number): void {
-    const el = THREE.MathUtils.degToRad(elevationDeg);
-    const az = THREE.MathUtils.degToRad(azimuthDeg);
-    // azimuth is a compass bearing: 0 = north (-Z), 90 = east (+X)
-    this.sunDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
-    this.sky.material.uniforms.sunPosition.value.copy(this.sunDir);
-
-    // warm, dimmer sun near the horizon (cheap air-mass approximation)
-    const m = 1 / Math.max(Math.sin(el) + 0.15 * Math.pow(Math.max(el * 57.3 + 3.885, 0.01), -1.253), 0.02);
-    const ext = [0.02, 0.045, 0.1].map((k) => Math.exp(-k * m * 1.2));
-    this.sunColor.setRGB(ext[0] * 1.05, ext[1] * 0.97, ext[2] * 0.86);
-    const I = 6 * THREE.MathUtils.smoothstep(el, -0.02, 0.06);
-    this.light.color.copy(this.sunColor);
-    this.light.intensity = I;
-    this.sunRadiance.set(this.sunColor.r * I, this.sunColor.g * I, this.sunColor.b * I);
-
-    this.refreshEnvironment();
-    this.measureHorizon();
+  /** ?sun=el,az debug override: freeze the sun at a fixed position */
+  pinSun(elevationDeg: number, azimuthDeg: number): void {
+    const el = THREE.MathUtils.degToRad(elevationDeg), az = THREE.MathUtils.degToRad(azimuthDeg);
+    this.pinned = new THREE.Vector3(Math.sin(az) * Math.cos(el), Math.sin(el), -Math.cos(az) * Math.cos(el)).normalize();
   }
 
-  /** fog colour = average sky radiance a couple of degrees above the horizon, all around */
-  private measureHorizon(): void {
-    const W = 16, H = 4;
-    this.horizonRT ??= new THREE.WebGLRenderTarget(W, H, { type: THREE.FloatType, depthBuffer: false });
-    const cam = new THREE.PerspectiveCamera(90, W / H, 0.1, 5000);
-    const px = new Float32Array(W * H * 4);
-    const acc = new THREE.Vector3();
-    const r = this.renderer;
-    const disc = this.sky.material.uniforms.showSunDisc;
-    disc.value = 0;
-    for (let i = 0; i < 4; i++) {
-      cam.rotation.set(0.035, (i * Math.PI) / 2, 0, 'YXZ');
-      cam.updateMatrixWorld();
-      r.setRenderTarget(this.horizonRT);
-      r.render(this.envScene, cam);
-      r.readRenderTargetPixels(this.horizonRT, 0, 0, W, H, px);
-      for (let j = 0; j < W * H; j++) acc.x += px[j * 4], acc.y += px[j * 4 + 1], acc.z += px[j * 4 + 2];
+  update(dt: number, time: GameTime, weather: Weather): void {
+    const w = weather.p;
+    this.sunDir.copy(this.pinned ?? time.sunDir);
+    this.moonDir.copy(time.moonDir);
+    const sunY = this.sunDir.y, moonY = this.moonDir.y;
+    this.night = THREE.MathUtils.smoothstep(-sunY, -0.02, 0.2);
+    const moonBright = time.moonLit * THREE.MathUtils.smoothstep(moonY, -0.02, 0.12);
+
+    // ---- sky ----
+    const u = this.skyU;
+    u.sunPosition.value.copy(this.sunDir);
+    u.cloudCoverage.value = w.cloudCoverage;
+    u.cloudDensity.value = w.cloudDensity;
+    u.time.value += dt * (0.4 + w.wind / 6);
+    u.uNight.value = this.night;
+    u.uOvercast.value = w.overcast;
+    u.uFlash.value = weather.flash;
+    u.uMoonBright.value = moonBright;
+    u.uMoonDir.value.copy(this.moonDir);
+    u.uStarRot.value = (time.hours / 24) * Math.PI * 2 + time.day * 0.0172;
+
+    // ---- the shading light: sun, or the moon once the sun is down ----
+    const el = Math.asin(THREE.MathUtils.clamp(sunY, -1, 1));
+    const cloudDim = 1 - 0.9 * w.overcast;
+    let intensity: number;
+    const color = new THREE.Color();
+    if (sunY > -0.03) {
+      // warm, dimmer sun near the horizon (cheap air-mass approximation)
+      const m = 1 / Math.max(Math.sin(Math.max(el, 0)) + 0.15 * Math.pow(Math.max((el * 180) / Math.PI + 3.885, 0.01), -1.253), 0.02);
+      const ext = [0.02, 0.045, 0.1].map((k) => Math.exp(-k * m * 1.2));
+      color.setRGB(ext[0] * 1.05, ext[1] * 0.97, ext[2] * 0.86);
+      intensity = 6 * THREE.MathUtils.smoothstep(el, -0.03, 0.07);
+      this.lightDir.copy(this.sunDir);
+    } else {
+      color.setRGB(0.62, 0.72, 1.0);
+      intensity = 0.3 * moonBright;
+      this.lightDir.copy(this.moonDir);
     }
-    disc.value = 1;
-    r.setRenderTarget(null);
-    acc.multiplyScalar(1 / (4 * W * H));
-    this.fogColor.setRGB(acc.x, acc.y, acc.z);
-  }
-  private horizonRT?: THREE.WebGLRenderTarget;
+    if (this.lightDir.y < 0.02) this.lightDir.y = 0.02; // keep shadows sane when the light grazes the horizon
+    this.lightDir.normalize();
+    intensity *= cloudDim;
+    this.light.color.copy(color);
+    this.light.intensity = intensity;
+    this.sunRadiance.set(color.r * intensity, color.g * intensity, color.b * intensity).multiplyScalar(1 - 0.6 * w.overcast);
 
-  /** re-bake the IBL cube from the current sky (call when the sun moves noticeably) */
+    // sky irradiance: daylight → twilight → moonlit night, dimmed by the cloud deck
+    const day = THREE.MathUtils.smoothstep(sunY, -0.12, 0.3);
+    const dusk = THREE.MathUtils.smoothstep(sunY, -0.15, 0.02) * (1 - THREE.MathUtils.smoothstep(sunY, 0.02, 0.25));
+    this.skyIrradiance.set(0.43, 0.48, 0.54).multiplyScalar(day)
+      .add(new THREE.Vector3(0.1, 0.07, 0.09).multiplyScalar(dusk))
+      .add(new THREE.Vector3(0.004, 0.006, 0.013).multiplyScalar(1 + 3 * moonBright))
+      .multiplyScalar(1 - 0.5 * w.overcast)
+      .addScalar(weather.flash * 1.2);
+
+    this.flashLight.intensity = weather.flash * 2.2;
+    this.fogDensity = w.fog;
+
+    // simple eye adaptation: the key light of the scene sets the exposure
+    const key = intensity * 0.5 + (this.skyIrradiance.x + this.skyIrradiance.y + this.skyIrradiance.z) * 1.4;
+    const target = 0.63 * THREE.MathUtils.clamp(Math.pow(4.8 / Math.max(key, 0.01), 0.33), 0.9, 2.6);
+    this.exposure += (target - this.exposure) * (1 - Math.exp(-dt * 1.5));
+
+    // IBL + fog colour: refresh periodically (they follow a slowly changing sky)
+    this.envAge += dt;
+    if (this.envAge > 1.2 || this.lastEnvLight.distanceTo(this.lightDir) > 0.05) {
+      this.envAge = 0;
+      this.lastEnvLight.copy(this.lightDir);
+      this.refreshEnvironment();
+      this.measureHorizon();
+    }
+  }
+
+  /** re-bake the IBL cube from the current sky */
   refreshEnvironment(): void {
     const prev = this.envRT;
-    // the sun itself is lit by the directional light; keep the disc out of the IBL
-    const disc = this.sky.material.uniforms.showSunDisc;
+    // the sun itself is lit by the directional light; keep the disc and the lightning out of the IBL
+    const disc = this.skyU.showSunDisc, flash = this.skyU.uFlash.value;
     disc.value = 0;
+    this.skyU.uFlash.value = 0;
     this.envRT = this.pmrem.fromScene(this.envScene, 0, 0.1, 2000);
     disc.value = 1;
+    this.skyU.uFlash.value = flash;
     this.scene.environment = this.envRT.texture;
-    this.scene.environmentIntensity = 1.0;
     prev?.dispose();
   }
 
-  update(time: number): void {
-    this.sky.material.uniforms.time.value = time;
+  /** fog colour = average sky radiance a couple of degrees above the horizon, all around (async readback) */
+  private measureHorizon(): void {
+    if (this.horizonPending) return;
+    const r = this.renderer;
+    const disc = this.skyU.showSunDisc;
+    disc.value = 0;
+    const prevTarget = r.getRenderTarget();
+    r.setRenderTarget(this.horizonRT);
+    for (let i = 0; i < 4; i++) {
+      this.horizonCam.rotation.set(0.035, (i * Math.PI) / 2, 0, 'YXZ');
+      this.horizonCam.updateMatrixWorld();
+      this.horizonRT.viewport.set(i * 16, 0, 16, 4);
+      r.setRenderTarget(this.horizonRT);
+      r.render(this.envScene, this.horizonCam);
+    }
+    this.horizonRT.viewport.set(0, 0, 64, 4);
+    disc.value = 1;
+    r.setRenderTarget(prevTarget);
+    this.horizonPending = true;
+    const px = new Float32Array(64 * 4 * 4);
+    r.readRenderTargetPixelsAsync(this.horizonRT, 0, 0, 64, 4, px).then(() => {
+      let x = 0, y = 0, z = 0;
+      for (let j = 0; j < 64 * 4; j++) { x += px[j * 4]; y += px[j * 4 + 1]; z += px[j * 4 + 2]; }
+      const n = 64 * 4;
+      if (Number.isFinite(x + y + z)) this.fogColor.setRGB(x / n, y / n, z / n);
+      this.horizonPending = false;
+    }, () => { this.horizonPending = false; });
   }
 
   /** keep the shadow frustum around the focus point (the boat) */
   follow(focus: THREE.Vector3): void {
     this.light.target.position.copy(focus);
-    this.light.position.copy(focus).addScaledVector(this.sunDir, 70);
+    this.light.position.copy(focus).addScaledVector(this.lightDir, 70);
     this.light.target.updateMatrixWorld();
     this.sky.position.copy(focus).setY(0);
   }

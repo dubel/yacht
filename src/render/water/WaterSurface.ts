@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GERSTNER_GLSL, WaveField } from '../../environment/WaveField';
+import { GERSTNER_GLSL, MAX_WAVES, WaveField } from '../../environment/WaveField';
 import { WATER_OPTICS_GLSL } from './optics';
 
 /*
@@ -20,15 +20,21 @@ uniform vec2 uRipCenter;
 ${GERSTNER_GLSL}
 varying vec3 vWorld;
 varying vec2 vParam;
+varying float vCrest;
+uniform float uChop;
 const mat2 M = mat2(0.8, -0.6, 0.6, 0.8);
 const float SC = 0.41, WB = 0.10;
 void main(){
   vec2 p = position.xz + uGridCenter;
   vec3 g = gerstnerDisplace(p);
+  // crest measure for whitecaps: height relative to the summed amplitudes
+  float ampSum = 0.0;
+  for (int i=0;i<${MAX_WAVES};i++) ampSum += uWaveB[i].x;
+  vCrest = g.y / max(ampSum, 1e-3);
   vec3 w = vec3(p.x + g.x, g.y, p.y + g.z);
   float camD = length(w.xz - cameraPosition.xz);
   float detail = exp(-camD*0.01);
-  w.y += detail*(textureLod(uSurf, w.xz/uL, 0.0).x + WB*SC*textureLod(uSurf, (M*w.xz)/(uL*SC) + 0.37, 0.0).x);
+  w.y += uChop*detail*(textureLod(uSurf, w.xz/uL, 0.0).x + WB*SC*textureLod(uSurf, (M*w.xz)/(uL*SC) + 0.37, 0.0).x);
   vec2 ruv = (w.xz - uRipCenter)/uRipSize + 0.5;
   if (all(greaterThan(ruv, vec2(0.0))) && all(lessThan(ruv, vec2(1.0)))) w.y += textureLod(uRip, ruv, 0.0).x;
   vParam = p;
@@ -46,10 +52,12 @@ uniform vec3 uSunDir, uSunRad, uSkyIrr, uFogColor;
 uniform float uFogDensity, uTime, uL, uRipSize;
 uniform vec2 uRipCenter;
 uniform int uView;
+uniform float uChop, uWhitecaps, uRain;
 ${GERSTNER_GLSL}
 ${WATER_OPTICS_GLSL}
 varying vec3 vWorld;
 varying vec2 vParam;
+varying float vCrest;
 
 const float PI = 3.14159265359;
 const mat2 M = mat2(0.8, -0.6, 0.6, 0.8);
@@ -69,6 +77,26 @@ vec4 texBS(sampler2D t, vec2 uv){
   vec2 g0 = w0+w1, g1 = w2+w3; vec2 h0 = (w1/g0 - 0.5 + p)/ts, h1 = (w3/g1 + 1.5 + p)/ts;
   return (texture(t, vec2(h0.x,h0.y))*g0.x + texture(t, vec2(h1.x,h0.y))*g1.x)*g0.y
        + (texture(t, vec2(h0.x,h1.y))*g0.x + texture(t, vec2(h1.x,h1.y))*g1.x)*g1.y;
+}
+
+// raindrop rings: each cell hosts a drop at a random phase; the expanding ring perturbs the slope
+vec2 rainRipples(vec2 p, float t){
+  vec2 acc = vec2(0.0);
+  for (int layer=0; layer<2; layer++){
+    vec2 q = p*(layer == 0 ? 2.3 : 3.7) + float(layer)*13.7;
+    vec2 id = floor(q);
+    for (int j=-1;j<=1;j++) for (int i=-1;i<=1;i++){
+      vec2 c = id + vec2(i,j);
+      float h = hash12(c);
+      vec2 o = c + vec2(hash12(c+1.7), hash12(c+5.3));
+      float ph = fract(t*(0.9 + 0.6*h) + h*7.0);
+      vec2 d = q - o;
+      float r = length(d);
+      float ring = sin((r - ph*0.9)*38.0) * smoothstep(0.1, 0.0, abs(r - ph*0.9)) * (1.0 - ph);
+      acc += ring * d/max(r, 1e-3);
+    }
+  }
+  return acc*0.07;
 }
 
 float linearDepth(float d){ float z = d*2.0-1.0; return 2.0*uNear*uFar/(uFar + uNear - z*(uFar - uNear)); }
@@ -95,9 +123,10 @@ void main(){
   vec4 R = vec4(0.0);
   float ripIn = 0.0;
   if (all(greaterThan(ruv, vec2(0.0))) && all(lessThan(ruv, vec2(1.0)))) { R = texture(uRip, ruv); ripIn = 1.0; }
-  vec2 slope = gerstnerSlope(vParam) + A.yz + WB*(transpose(M)*B.yz) + R.yz;
-  slope += 0.13*exp(-dist*0.04)*(transpose(M2)*Cm.yz);
-  float var = max(A.w - dot(A.yz,A.yz), 0.0) + WB*WB*max(B.w - dot(B.yz,B.yz), 0.0);
+  vec2 slope = gerstnerSlope(vParam) + uChop*(A.yz + WB*(transpose(M)*B.yz)) + R.yz;
+  slope += uChop*0.13*exp(-dist*0.04)*(transpose(M2)*Cm.yz);
+  if (uRain > 0.01) slope += uRain*rainRipples(P.xz, uTime)*exp(-dist*0.05);
+  float var = uChop*uChop*(max(A.w - dot(A.yz,A.yz), 0.0) + WB*WB*max(B.w - dot(B.yz,B.yz), 0.0));
   vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
 
   // ---- seen from below: Snell's window, total internal reflection outside it ----
@@ -209,7 +238,10 @@ void main(){
   float shoreD = max(P.y - bedStraight.y, 0.0);
   float shore = smoothstep(0.45, 0.05, shoreD) * (0.55 + 0.45*sin(uTime*1.3 - shoreD*14.0 + foamN*4.0));
   shore *= smoothstep(0.35, 0.7, foamN);
-  float foam = clamp(max(wake, shore*0.8), 0.0, 1.0);
+  // wind-driven whitecaps on the steepest crests
+  float capCover = uWhitecaps*smoothstep(0.35, 0.95, vCrest + 0.35*(cells - 0.5));
+  float caps = smoothstep(1.0 - capCover, 1.0 - capCover + 0.18, vnoise(P.xz*2.2 + uTime*0.5)*0.5 + cells*0.5);
+  float foam = clamp(max(max(wake, shore*0.8), caps*0.9), 0.0, 1.0);
   vec3 foamCol = 1.15/PI*(uSunRad*max(dot(n, uSunDir), 0.0)*0.9 + uSunRad*0.12 + uSkyIrr*1.6);
   col = mix(col, foamCol, foam*0.85);
 
@@ -292,6 +324,9 @@ export class WaterSurface {
       uFogDensity: { value: 0.001 },
       uTime: { value: 0 },
       uView: { value: 0 },
+      uChop: { value: 1 },
+      uWhitecaps: { value: 0 },
+      uRain: { value: 0 },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,

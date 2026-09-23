@@ -32,6 +32,20 @@ export class Boat {
   }
 
   sails!: Sails;
+  /** stern lantern: lit at dusk */
+  private readonly lantern = new THREE.PointLight(0xffb060, 0, 26, 2);
+  private readonly lanternGlass = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 12, 8),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(0, 0, 0), toneMapped: false }),
+  );
+
+  /** 0 = off … 1 = full night */
+  setLantern(k: number, t: number): void {
+    const flicker = 0.92 + 0.05 * Math.sin(t * 13.1) + 0.03 * Math.sin(t * 29.7);
+    this.lantern.intensity = 9 * k * flicker;
+    this.lantern.visible = k > 0.01;
+    (this.lanternGlass.material as THREE.MeshBasicMaterial).color.setRGB(1, 0.62, 0.3).multiplyScalar(0.05 + 30 * k * flicker);
+  }
 
   /** sail visuals follow the physics (trim angle, furling, luffing) */
   setRig(r: RigState, t: number): void {
@@ -84,6 +98,10 @@ export class Boat {
     this.model.add(scene);
     this.sails = new Sails(this.model, this.root, null);
     this.root.add(this.sails.group);
+    // on the taffrail, above the stern cabin
+    this.lantern.position.set(0, 3.3, hullBox.min.z - cz + 0.5);
+    this.lanternGlass.position.copy(this.lantern.position);
+    this.root.add(this.lantern, this.lanternGlass);
     this.info = {
       hullStern: hullBox.min.z - cz,
       hullBow: hullBox.max.z - cz,

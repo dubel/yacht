@@ -1,0 +1,234 @@
+/*
+ * Sound (MILESTONES M16). Recorded layers (Wikimedia Commons, see public/assets/audio/CREDITS.md) plus
+ * synthesised ones (WebAudio noise → filters): wind, rigging whistle, water rushing past the hull, sail
+ * flogging. Everything is driven by the same state as the visuals: wind, weather, boat, time of day.
+ * Browsers only allow audio after a user gesture, so the context starts on the first click / key press.
+ */
+
+export interface AudioState {
+  windSpeed: number;
+  rain: number;
+  /** boat speed through water, m/s */
+  speed: number;
+  /** |roll rate| + |pitch rate|, rad/s */
+  motion: number;
+  luffing: boolean;
+  sailsUp: number;
+  /** m below the surface (> 0 = lens under water) */
+  submerged: number;
+  night: number;
+  /** 0 open water … 1 right at a beach */
+  shore: number;
+  waves: number;
+  daylight: number;
+}
+
+export interface ThunderEvent {
+  distance: number;
+  /** −1 left … 1 right */
+  pan: number;
+}
+
+const LOOPS = ['ocean', 'lapping', 'rain-light', 'rain-heavy', 'crickets', 'creak-loop'] as const;
+const SHOTS = ['thunder-1', 'thunder-2', 'thunder-3', 'thunder-4', 'thunder-5', 'gull-1', 'gull-2', 'gull-3', 'creak-1'] as const;
+type LoopName = (typeof LOOPS)[number];
+type ShotName = (typeof SHOTS)[number];
+
+interface Loop { gain: GainNode; }
+
+export class AudioSystem {
+  muted = false;
+  private ctx: AudioContext | null = null;
+  private master!: GainNode;
+  private muffle!: BiquadFilterNode;
+  private readonly buffers = new Map<string, AudioBuffer>();
+  private readonly loops = new Map<LoopName, Loop>();
+  private noise!: AudioBuffer;
+  private wind!: { gain: GainNode; band: BiquadFilterNode };
+  private whistle!: { gain: GainNode; band: BiquadFilterNode };
+  private rush!: { gain: GainNode; low: BiquadFilterNode };
+  private flog!: { gain: GainNode; lfo: OscillatorNode };
+  private gullT = 6;
+  private creakT = 4;
+
+  constructor(private readonly base = 'assets/audio/') {
+    const start = () => {
+      this.start();
+      removeEventListener('pointerdown', start);
+      removeEventListener('keydown', start);
+    };
+    addEventListener('pointerdown', start);
+    addEventListener('keydown', start);
+  }
+
+  get started(): boolean { return !!this.ctx; }
+
+  toggleMute(): void {
+    this.muted = !this.muted;
+    if (this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.9, this.ctx.currentTime, 0.1);
+  }
+
+  private start(): void {
+    if (this.ctx) return;
+    const ctx = new AudioContext();
+    this.ctx = ctx;
+    this.master = ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.9;
+    this.muffle = ctx.createBiquadFilter();
+    this.muffle.type = 'lowpass';
+    this.muffle.frequency.value = 20000;
+    this.muffle.connect(this.master).connect(ctx.destination);
+
+    // 3 s of stereo white noise feeds every synthesised layer
+    this.noise = ctx.createBuffer(2, ctx.sampleRate * 3, ctx.sampleRate);
+    for (let c = 0; c < 2; c++) {
+      const d = this.noise.getChannelData(c);
+      for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const noiseSrc = () => {
+      const s = ctx.createBufferSource();
+      s.buffer = this.noise;
+      s.loop = true;
+      s.start(0, Math.random() * 3);
+      return s;
+    };
+    const chain = (...nodes: AudioNode[]) => { for (let i = 0; i < nodes.length - 1; i++) nodes[i].connect(nodes[i + 1]); };
+
+    // wind: broad band noise, brighter and louder as it blows harder
+    {
+      const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.Q.value = 0.6; band.frequency.value = 400;
+      const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = 2500;
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      chain(noiseSrc(), band, low, gain, this.muffle);
+      this.wind = { gain, band };
+    }
+    // rigging whistle: narrow resonance that only sings in strong wind
+    {
+      const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.Q.value = 18; band.frequency.value = 1100;
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      chain(noiseSrc(), band, gain, this.muffle);
+      this.whistle = { gain, band };
+    }
+    // water rushing past the hull
+    {
+      const low = ctx.createBiquadFilter(); low.type = 'lowpass'; low.frequency.value = 700;
+      const high = ctx.createBiquadFilter(); high.type = 'highpass'; high.frequency.value = 90;
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      chain(noiseSrc(), high, low, gain, this.muffle);
+      this.rush = { gain, low };
+    }
+    // sail flogging: band-passed noise chopped by a fast LFO
+    {
+      const band = ctx.createBiquadFilter(); band.type = 'bandpass'; band.Q.value = 1.2; band.frequency.value = 320;
+      const chop = ctx.createGain(); chop.gain.value = 0;
+      const lfo = ctx.createOscillator(); lfo.type = 'sawtooth'; lfo.frequency.value = 7;
+      const shaper = ctx.createWaveShaper();
+      const curve = new Float32Array(256);
+      for (let i = 0; i < 256; i++) { const x = i / 127.5 - 1; curve[i] = Math.pow(Math.max(0, x), 3); }
+      shaper.curve = curve;
+      lfo.connect(shaper).connect(chop.gain);
+      lfo.start();
+      const gain = ctx.createGain(); gain.gain.value = 0;
+      chain(noiseSrc(), band, chop, gain, this.muffle);
+      this.flog = { gain, lfo };
+    }
+
+    for (const name of [...LOOPS, ...SHOTS]) this.load(name);
+  }
+
+  private async load(name: LoopName | ShotName): Promise<void> {
+    const ctx = this.ctx!;
+    try {
+      const data = await (await fetch(`${this.base}${name}.mp3`)).arrayBuffer();
+      const buf = await ctx.decodeAudioData(data);
+      this.buffers.set(name, buf);
+      if ((LOOPS as readonly string[]).includes(name)) {
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = true;
+        // skip the MP3 encoder padding so the crossfaded loop is seamless
+        src.loopStart = 0.06;
+        src.loopEnd = buf.duration - 0.06;
+        const gain = ctx.createGain();
+        gain.gain.value = 0;
+        src.connect(gain).connect(this.muffle);
+        src.start(0, Math.random() * (buf.duration - 1));
+        this.loops.set(name as LoopName, { gain });
+      }
+    } catch (e) {
+      console.warn('audio: could not load', name, e);
+    }
+  }
+
+  private play(name: ShotName, volume: number, opts: { pan?: number; delay?: number; rate?: number; lowpass?: number } = {}): void {
+    const ctx = this.ctx, buf = this.buffers.get(name);
+    if (!ctx || !buf) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = opts.rate ?? 1;
+    const gain = ctx.createGain();
+    gain.gain.value = volume;
+    let node: AudioNode = src;
+    if (opts.lowpass) {
+      const f = ctx.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = opts.lowpass;
+      node.connect(f); node = f;
+    }
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = opts.pan ?? 0;
+    node.connect(gain).connect(pan).connect(this.muffle);
+    src.start(ctx.currentTime + (opts.delay ?? 0));
+  }
+
+  /** a lightning strike: the thunder arrives at the speed of sound, duller from far away */
+  thunder(e: ThunderEvent): void {
+    if (!this.ctx) return;
+    const near = Math.min(1, 900 / e.distance);
+    const pick = e.distance < 1200 ? ['thunder-4', 'thunder-5'] : ['thunder-1', 'thunder-2', 'thunder-3'];
+    const name = pick[Math.floor(Math.random() * pick.length)] as ShotName;
+    this.play(name, 0.25 + 0.75 * near, { pan: e.pan * 0.7, delay: Math.min(e.distance / 343, 14), lowpass: 350 + 7000 * near * near, rate: 0.9 + 0.2 * Math.random() });
+  }
+
+  update(dt: number, s: AudioState): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime;
+    const set = (p: AudioParam, v: number, tc = 0.3) => p.setTargetAtTime(v, t, tc);
+    const loop = (n: LoopName, v: number) => { const l = this.loops.get(n); if (l) set(l.gain.gain, v, 0.6); };
+
+    const under = s.submerged > 0.05;
+    set(this.muffle.frequency, under ? 420 : 20000, 0.15);
+    const air = under ? 0.25 : 1;
+
+    const w = s.windSpeed;
+    set(this.wind.gain.gain, air * 0.05 * Math.pow(w / 8, 2.2), 0.25);
+    set(this.wind.band.frequency, 260 + w * 38, 0.4);
+    set(this.whistle.gain.gain, air * 0.018 * Math.max(0, (w - 9) / 8) * (0.6 + 0.4 * Math.sin(t * 0.7)), 0.3);
+    set(this.whistle.band.frequency, 850 + w * 45 + 120 * Math.sin(t * 0.37), 0.5);
+    set(this.rush.gain.gain, 0.09 * Math.pow(Math.min(s.speed, 7) / 4, 1.6), 0.3);
+    set(this.rush.low.frequency, 450 + s.speed * 160, 0.3);
+    set(this.flog.gain.gain, s.luffing ? air * 0.12 * s.sailsUp * Math.min(1, w / 7) : 0, 0.15);
+    set(this.flog.lfo.frequency, 5 + w * 0.35, 0.5);
+
+    loop('ocean', 0.12 + 0.55 * s.shore + 0.12 * Math.max(0, s.waves - 1));
+    loop('lapping', 0.35 * (1 - Math.min(1, s.speed / 4)) + 0.1);
+    loop('rain-light', air * Math.min(1, s.rain * 2) * (1 - s.rain) * 0.9 + air * 0.25 * s.rain);
+    loop('rain-heavy', air * Math.max(0, s.rain - 0.3) * 1.1);
+    loop('crickets', air * 0.5 * s.night * s.shore * (1 - s.rain));
+    loop('creak-loop', 0.05 + Math.min(0.5, s.motion * 1.6) * (0.5 + 0.2 * s.waves));
+
+    // occasional one-shots
+    this.gullT -= dt;
+    if (this.gullT <= 0) {
+      this.gullT = 7 + Math.random() * 18;
+      if (s.daylight > 0.5 && s.rain < 0.1 && !under && Math.random() < 0.3 + 0.7 * s.shore) {
+        const g = (['gull-1', 'gull-2', 'gull-3'] as const)[Math.floor(Math.random() * 3)];
+        this.play(g, 0.25 + 0.35 * s.shore, { pan: Math.random() * 1.6 - 0.8, rate: 0.9 + Math.random() * 0.25 });
+      }
+    }
+    this.creakT -= dt;
+    if (this.creakT <= 0) {
+      this.creakT = 2 + Math.random() * 6;
+      if (s.motion > 0.04) this.play('creak-1', Math.min(0.6, 0.2 + s.motion * 2), { rate: 0.7 + Math.random() * 0.4, pan: Math.random() - 0.5 });
+    }
+  }
+}

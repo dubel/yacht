@@ -23,6 +23,9 @@ Wymaga WebGL2 z `EXT_color_buffer_float` (każdy współczesny desktop, większo
 | `Spacja` | postaw / zwiń żagle |
 | mysz (przeciąganie), kółko | obrót kamery (także pod wodę), zoom |
 | `V` | zanurz kamerę pod łódź / wynurz |
+| `N` | następna pogoda (blokuje automatyczne zmiany) |
+| `[` / `]` | czas −1 h / +1 h |
+| `M` | wycisz dźwięk (dźwięk startuje po pierwszym kliknięciu / klawiszu — wymóg przeglądarek) |
 | `R` | reset łodzi |
 | `F1` | panel debug |
 | `F2`–`F8` | widoki wody: final, normalne, kaustyki, odbicie, głębokość, ripples/kilwater, FFT |
@@ -30,10 +33,27 @@ Wymaga WebGL2 z `EXT_color_buffer_float` (każdy współczesny desktop, większo
 
 Cel: opłyń 5 boi (dowolna kolejność) i wróć na start. Najlepszy czas zapisuje się lokalnie.
 
-## Parametry URL (debug / zrzuty)
+## Pora dnia i pogoda (parametry URL)
 
-`?debug` · `?t=5` (zamrożony czas) · `?view=caustics` · `?cam=x,y,z,tx,ty,tz` (wolna kamera) ·
-`?sun=elewacja,azymut` · `?speed=4` (prędkość startowa m/s) · `?q=0.8` (skala rozdzielczości) ·
+Doba trwa 7 minut. Pogoda zmienia się sama (pogodnie → pochmurno → deszcz → burza → sztorm…), chyba że ją ustawisz.
+
+| Parametr | Znaczenie | Przykład |
+| --- | --- | --- |
+| `time` | godzina startu | `?time=18:30`, `?time=6` |
+| `weather` | pogoda: `clear`/`pogodnie`, `cloudy`/`pochmurno`, `rain`/`deszcz`, `storm`/`burza`, `gale`/`sztorm`, `fog`/`mgla`, `auto` | `?weather=burza` |
+| `daylen` | długość doby w minutach (`0` = zatrzymany zegar) | `?daylen=2` |
+
+Np. zachód słońca w sztormie: `?time=17:40&weather=sztorm`, noc przy pełni: `?time=21&weather=pogodnie`.
+
+Pogoda steruje wszystkim naraz: zachmurzeniem i jasnością nieba, światłem, mgłą, wiatrem (a więc prędkością i przechyłem),
+wysokością fal (także w fizyce), wzburzeniem i grzywaczami, deszczem (smugi + kręgi na wodzie), błyskawicami (błysk,
+piorun, grzmot opóźniony o czas dojścia dźwięku) i dźwiękiem. Nocą świeci księżyc z prawdziwą fazą (tarcza oświetlana
+z kierunku słońca), gwiazdy obracają się z czasem, woda odbija księżycową ścieżkę.
+
+## Parametry debug
+
+`?debug` · `?t=5` (zamrożony czas symulacji) · `?view=caustics` · `?cam=x,y,z,tx,ty,tz` (wolna kamera) ·
+`?sun=elewacja,azymut` (przypięte słońce) · `?speed=4` (prędkość startowa m/s) · `?q=0.8` (skala rozdzielczości) ·
 `?noadapt` · `?inspect=side|front|top` (ortogonalny widok łodzi z siatką 1 m — do pomiarów takielunku)
 
 ## Architektura
@@ -54,7 +74,9 @@ src/
 │       ├── UnderwaterParticles  zawiesina wokół kamery pod wodą
 │       ├── underwaterLight wspólny patch oświetlenia pod wodą (dno, kadłub, boje)
 │       └── optics.ts       wspólne stałe optyczne wody
-├── environment/            Environment (niebo Preethama, słońce, IBL, kolor mgły), Wind, WaveField (Gerstner CPU=GPU)
+├── environment/            Environment (niebo, słońce, księżyc, gwiazdy, IBL, mgła), GameTime, Weather, WeatherFX (deszcz,
+│                           pioruny), Wind, WaveField (Gerstner CPU=GPU)
+├── audio/AudioSystem.ts    warstwy nagrań + synteza WebAudio
 ├── world/                  Terrain (analityczna mapa wysokości: wyspy, rafa, dno), Vegetation (instancing)
 ├── boat/                   Boat (GLB), Sails (proceduralne żagle + obracane reje/bom/gafel)
 ├── physics/BoatPhysics.ts  6DOF: wyporność wielopunktowa, kil/ster/żagiel jako profile, wiatr pozorny
@@ -89,11 +111,11 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
 | 9 | kilwater | ✅ fala dziobowa/rufowa w symulacji, turbulencja, piana w przestrzeni świata |
 | 10 | odbicia świata | ✅ odbicie planarne (wyspy, łódź, roślinność) |
 | 11 | pod wodą | ✅ absorpcja i rozpraszanie, promienie światła z kaustyk, okno Snella i całkowite odbicie od spodu powierzchni, kaustyki na kadłubie, zawiesina, widok dzielony linią wody. ❌ bąbelki |
-| 12 | dzień/noc | ◐ słońce sterowane `?sun=`, brak cyklu |
-| 13 | pogoda | ◐ podmuchy i skręty wiatru; brak stanów pogody |
+| 12 | dzień/noc | ✅ doba 7 min, wschody/zachody, księżyc z fazami, gwiazdy, adaptacja ekspozycji |
+| 13 | pogoda | ✅ 6 stanów z płynnymi przejściami i automatyczną zmianą; deszcz, burza z piorunami, sztorm, mgła |
 | 14 | pętla gry | ✅ v1: boje + czas + rekord |
 | 15 | dopracowanie świata | ◐ proceduralne palmy/drzewa/krzaki (low-poly) |
-| 16 | audio | ❌ |
+| 16 | audio | ✅ nagrania CC/PD (ocean, chlupot, deszcz, grzmoty, mewy, świerszcze, skrzypienie) + synteza (wiatr, gwizd w olinowaniu, szum wody przy burcie, łopot żagla), wytłumienie pod wodą |
 | 17 | wydajność | ◐ adaptacyjna rozdzielczość; brak profili jakości |
 | 18–19 | cloth v2, polish | ❌ / ◐ (ekran ładowania, rekord) |
 
@@ -107,4 +129,6 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing
   i tekstura kamyków dna (`public/assets/textures/pebbles.jpg`). Oryginał referencyjny:
   `third_party/clearwater/index.reference.html`.
+- **Dźwięki** — nagrania z Wikimedia Commons (CC0, domena publiczna, CC BY 3.0, CC BY-SA 3.0/4.0),
+  przycięte i przekodowane; pełna lista autorów i licencji: `public/assets/audio/CREDITS.md`.
 - Three.js — MIT.
