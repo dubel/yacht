@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { fbm, mulberry32, smoothstep } from '../core/noise';
+import { CLOUD_SHADOW_GLSL, cloudShadowUniforms } from '../environment/Clouds';
 
 /*
  * Procedural island vegetation (SKETCH §18, first pass): palms along the beaches, rounded jungle trees
@@ -106,7 +107,11 @@ export class Vegetation {
     const rnd = mulberry32(42);
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
     material.onBeforeCompile = (sh) => {
-      Object.assign(sh.uniforms, this.uniforms);
+      Object.assign(sh.uniforms, this.uniforms, cloudShadowUniforms);
+      sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vCloudWP;');
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCloudWP;\n' + CLOUD_SHADOW_GLSL)
+        .replace('#include <lights_fragment_end>', '#include <lights_fragment_end>\nreflectedLight.directDiffuse *= cloudShadow(vCloudWP);');
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nuniform float uTime;\nuniform vec3 uWind; // xz = direction × strength')
         .replace(
@@ -122,6 +127,7 @@ vec4 mvPosition = vec4( transformed, 1.0 );
   float sway = sin(uTime*1.6 + ph) * 0.35 + sin(uTime*3.7 + ph*2.3) * 0.12;
   mvPosition.xz += uWind.xz * (gust + sway) * hgt*hgt * 0.0035;
 #endif
+vCloudWP = (modelMatrix * mvPosition).xyz;
 mvPosition = modelViewMatrix * mvPosition;
 gl_Position = projectionMatrix * mvPosition;`,
         );

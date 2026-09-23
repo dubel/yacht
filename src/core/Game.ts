@@ -16,6 +16,7 @@ import { WaveField } from '../environment/WaveField';
 import { GameTime } from '../environment/GameTime';
 import { Weather } from '../environment/Weather';
 import { WeatherFX } from '../environment/WeatherFX';
+import { BANDS, Clouds, cloudShadowUniforms } from '../environment/Clouds';
 import { Terrain } from '../world/Terrain';
 import { Vegetation } from '../world/Vegetation';
 import { Mission } from '../gameplay/Mission';
@@ -47,6 +48,8 @@ export class Game {
   readonly boat = new Boat();
   readonly particles = new UnderwaterParticles();
   readonly weatherFx = new WeatherFX();
+  readonly clouds: Clouds;
+  private readonly flashDir = new THREE.Vector3(1, 0.2, 0);
   terrain!: Terrain;
   vegetation!: Vegetation;
   mission!: Mission;
@@ -86,8 +89,15 @@ export class Game {
     const windToward = Math.atan2(this.wind.dir.z, this.wind.dir.x);
     this.waves = new WaveField(windToward);
     this.env = new Environment(this.renderer, this.scene);
+    this.clouds = new Clouds(this.blit);
+    this.env.sky.material.uniforms.uCloudMap.value = this.clouds.map.texture;
+    cloudShadowUniforms.uCloudShadow.value = this.clouds.shadow.texture;
+    this.updateClouds(0);
     if (Config.sunOverride) this.env.pinSun(Config.sunOverride.elevation, Config.sunOverride.azimuth);
     this.env.update(0, this.clock, this.weather);
+    // fill the whole cloud map once (it normally refreshes a quarter per frame), then re-bake the IBL with it
+    for (let i = 0; i < BANDS; i++) this.updateClouds(0);
+    this.env.refreshEnvironment();
     this.scene.fog = new THREE.FogExp2(this.env.fogColor, this.env.fogDensity);
 
     this.spectrum = new WaterSpectrum(this.blit, Config.fft.N, Config.fft.L, Config.fft.targetSlope, [this.wind.dir.x, this.wind.dir.z]);
@@ -185,7 +195,15 @@ export class Game {
   }
 
   frame(now: number): void {
-    const dt = Math.min(0.05, (now - this.last) / 1000);
+    // apply a deferred resolution change before anything is drawn this frame
+    if (this.pendingQuality !== null) {
+      this.quality = this.pendingQuality;
+      this.pendingQuality = null;
+      this.outOfBand = 0;
+      this.resize();
+    }
+    // rAF timestamps can predate performance.now() taken at start → never let time run backwards
+    const dt = Math.min(0.05, Math.max(0, (now - this.last) / 1000));
     this.last = now;
     this.time = Config.fixedTime ?? this.time + dt;
     const t = this.time;
@@ -202,6 +220,7 @@ export class Game {
     this.wind.gustiness = wp.gustiness;
     this.wind.update(t);
     if (Math.abs(this.waves.intensity - wp.waves) > 0.005) { this.waves.intensity = wp.waves; this.waves.pack(); }
+    this.updateClouds(Config.fixedTime !== null ? 1 / 60 : dt);
     this.env.update(Config.fixedTime !== null ? 1 / 60 : dt, this.clock, this.weather);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(this.env.fogColor);
@@ -233,7 +252,7 @@ export class Game {
     u.uTime.value = t;
     u.uView.value = VIEW_IDS[this.view];
     u.uSunDir.value.copy(this.env.lightDir);
-    u.uSunRad.value.copy(this.env.sunRadiance);
+    u.uSunRadIn.value.copy(this.env.sunRadiance);
     u.uSkyIrr.value.copy(this.env.skyIrradiance);
     u.uChop.value = wp.chop;
     u.uWhitecaps.value = wp.whitecaps;
@@ -303,6 +322,17 @@ export class Game {
     this.renderer.render(this.scene, this.inspectCam);
   }
 
+  private updateClouds(dt: number): void {
+    const w = this.weather.p, s = this.weather.strike;
+    if (s) this.flashDir.set(Math.sin(s.angle), 0.25, Math.cos(s.angle)).normalize();
+    const focus = this.cam?.camera.position ?? new THREE.Vector3();
+    this.clouds.update(dt, focus, { coverage: w.cloudCoverage, density: w.cloudDensity, base: w.cloudBase, top: w.cloudTop, type: w.cloudType },
+      { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed },
+      { dir: this.env.cloudLightDir, color: this.env.cloudLight, ambient: this.env.cloudAmbient, flash: this.weather.flash, flashDir: this.flashDir });
+    const r = cloudShadowUniforms.uCloudShadowRect.value;
+    r.set(this.clouds.shadowCenter.x, this.clouds.shadowCenter.y, this.clouds.shadowSize);
+  }
+
   /** 0 in open water … 1 next to a beach (for surf / crickets / gulls) */
   private shoreProximity(p: THREE.Vector3): number {
     let best = 160;
@@ -316,14 +346,23 @@ export class Game {
     return THREE.MathUtils.clamp(1 - best / 160, 0, 1);
   }
 
+  /**
+   * Adaptive render resolution. The resize itself is *deferred to the start of the next frame*: resizing the
+   * canvas after this frame has been drawn clears it, and the browser would present a black frame (flicker).
+   * Hysteresis: the frame time must stay out of the band for ~2 s, and steps are at least 4 s apart.
+   */
   private adaptQuality(dt: number): void {
     if (!Config.adaptiveQuality) return;
     this.ftAvg = this.ftAvg * 0.95 + dt * 1000 * 0.05;
     this.framesSinceResize++;
-    if (this.framesSinceResize < 90) return;
-    if (this.ftAvg > 21 && this.quality > 0.45) { this.quality = Math.max(0.45, this.quality * 0.88); this.resize(); }
-    else if (this.ftAvg < 14.5 && this.quality < 1.0) { this.quality = Math.min(1.0, this.quality * 1.06); this.resize(); }
+    const slow = this.ftAvg > 21, fast = this.ftAvg < 13.5;
+    this.outOfBand = slow || fast ? this.outOfBand + dt : 0;
+    if (this.framesSinceResize < 240 || this.outOfBand < 2) return;
+    if (slow && this.quality > 0.45) this.pendingQuality = Math.max(0.45, this.quality * 0.88);
+    else if (fast && this.quality < 1.0) this.pendingQuality = Math.min(1.0, this.quality * 1.06);
   }
+  private outOfBand = 0;
+  private pendingQuality: number | null = null;
 
   get fps(): number { return 1000 / this.ftAvg; }
 

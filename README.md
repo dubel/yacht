@@ -48,6 +48,10 @@ Doba trwa 7 minut. Pogoda zmienia się sama (pogodnie → pochmurno → deszcz �
 
 Np. zachód słońca w sztormie: `?time=17:40&weather=sztorm`, noc przy pełni: `?time=21&weather=pogodnie`.
 
+Chmury są wolumetryczne (ray-marching przez warstwę na zakrzywionej Ziemi, szum Perlin-Worley jak w *Horizon Zero Dawn*):
+odbijają się w wodzie, rzucają przesuwające się cienie na lagunę, wyspy i łódź, o zachodzie świecą od spodu na czerwono,
+nocą oświetla je księżyc, a błyskawice rozświetlają je od środka. Burza buduje wieże do 6.5 km.
+
 Pogoda steruje wszystkim naraz: zachmurzeniem i jasnością nieba, światłem, mgłą, wiatrem (a więc prędkością i przechyłem),
 wysokością fal (także w fizyce), wzburzeniem i grzywaczami, deszczem (smugi + kręgi na wodzie), błyskawicami (błysk,
 piorun, grzmot opóźniony o czas dojścia dźwięku) i dźwiękiem. Nocą świeci księżyc z prawdziwą fazą (tarcza oświetlana
@@ -77,8 +81,8 @@ src/
 │       ├── UnderwaterParticles  zawiesina wokół kamery pod wodą
 │       ├── underwaterLight wspólny patch oświetlenia pod wodą (dno, kadłub, boje)
 │       └── optics.ts       wspólne stałe optyczne wody
-├── environment/            Environment (niebo, słońce, księżyc, gwiazdy, IBL, mgła), GameTime, Weather, WeatherFX (deszcz,
-│                           pioruny), Wind, WaveField (Gerstner CPU=GPU)
+├── environment/            Environment (niebo, słońce, księżyc, gwiazdy, IBL, mgła), Clouds (chmury wolumetryczne + cienie),
+│                           GameTime, Weather, WeatherFX (deszcz, pioruny), Wind, WaveField (Gerstner CPU=GPU)
 ├── audio/AudioSystem.ts    warstwy nagrań + synteza WebAudio
 ├── world/                  Terrain (analityczna mapa wysokości: wyspy, rafa, dno), Vegetation (instancing)
 ├── boat/                   Boat (GLB), Sails (proceduralne żagle + obracane reje/bom/gafel)
@@ -115,7 +119,7 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
 | 10 | odbicia świata | ✅ odbicie planarne (wyspy, łódź, roślinność) |
 | 11 | pod wodą | ✅ absorpcja i rozpraszanie, promienie światła z kaustyk, okno Snella i całkowite odbicie od spodu powierzchni, kaustyki na kadłubie, zawiesina, widok dzielony linią wody. ❌ bąbelki |
 | 12 | dzień/noc | ✅ doba 7 min, wschody/zachody, księżyc z fazami, gwiazdy, adaptacja ekspozycji |
-| 13 | pogoda | ✅ 6 stanów z płynnymi przejściami i automatyczną zmianą; deszcz, burza z piorunami, sztorm, mgła |
+| 13 | pogoda | ✅ 6 stanów z płynnymi przejściami i automatyczną zmianą; chmury wolumetryczne z cieniami; deszcz, burza z piorunami, sztorm, mgła |
 | 14 | pętla gry | ✅ v1: boje + czas + rekord |
 | 15 | dopracowanie świata | ◐ proceduralne palmy/drzewa/krzaki (low-poly) |
 | 16 | audio | ✅ nagrania CC/PD (ocean, chlupot, deszcz, grzmoty, mewy, świerszcze, skrzypienie) + synteza (wiatr, gwizd w olinowaniu, szum wody przy burcie, łopot żagla), wytłumienie pod wodą |

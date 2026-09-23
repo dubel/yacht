@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { WATER_OPTICS_GLSL } from './optics';
+import { CLOUD_SHADOW_GLSL, cloudShadowUniforms } from '../../environment/Clouds';
 
 /**
  * Shared shader patch for any lit surface that can be under water (seabed, hull, buoys):
@@ -16,7 +17,7 @@ export const underwaterUniforms = {
 };
 
 export function patchUnderwater(sh: THREE.WebGLProgramParametersWithUniforms): void {
-  Object.assign(sh.uniforms, underwaterUniforms);
+  Object.assign(sh.uniforms, underwaterUniforms, cloudShadowUniforms);
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
     .replace('#include <project_vertex>', '#include <project_vertex>\nvWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;');
@@ -30,12 +31,17 @@ uniform vec2 uCausShift;
 uniform float uCausPatch, uCausDepth;
 uniform vec3 uSunW;
 ${WATER_OPTICS_GLSL}
+${CLOUD_SHADOW_GLSL}
 `,
     )
     .replace(
       '#include <lights_fragment_end>',
       /* glsl */ `#include <lights_fragment_end>
 {
+  // cloud shadows
+  float cs = cloudShadow(vWPos);
+  reflectedLight.directDiffuse *= cs;
+  reflectedLight.directSpecular *= cs;
   float d = max(-vWPos.y, 0.0);
   float uw = smoothstep(0.12, -0.12, vWPos.y);
   vec3 sunT = refract(-uSunW, vec3(0,1,0), 1.0/WATER_IOR);

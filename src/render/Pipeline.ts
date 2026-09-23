@@ -141,7 +141,7 @@ export class Pipeline {
       uw.uCaus.value = caustics;
       uw.uInvViewProj.value.copy(u.uInvViewProj.value);
       uw.uSunDir.value.copy(u.uSunDir.value);
-      uw.uSunRad.value.copy(u.uSunRad.value);
+      uw.uSunRad.value.copy(u.uSunRadIn.value);
       uw.uSkyIrr.value.copy(u.uSkyIrr.value);
       uw.uTime.value = time;
       uw.uWaveTime.value = u.uWaveTime.value;

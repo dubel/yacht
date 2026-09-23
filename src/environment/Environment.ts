@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import type { GameTime } from './GameTime';
 import type { Weather } from './Weather';
+import { CLOUD_MAP_GLSL } from './Clouds';
 
 /**
  * Sun, moon, sky and image-based lighting, driven by GameTime + Weather.
@@ -13,6 +14,8 @@ import type { Weather } from './Weather';
 const SKY_PATCH_UNIFORMS = /* glsl */ `
 uniform float uSkyScale, uNight, uOvercast, uFlash, uMoonBright, uStarRot;
 uniform vec3 uMoonDir;
+uniform sampler2D uCloudMap;
+${CLOUD_MAP_GLSL}
 float skyHash(vec3 p){ p = fract(p*0.3183099 + 0.1); p *= 17.0; return fract(p.x*p.y*p.z*(p.x + p.y + p.z)); }
 `;
 
@@ -67,8 +70,16 @@ const SKY_PATCH_END = /* glsl */ `
 				vec3 deck = vec3(0.86, 0.9, 0.97) * through * (0.7 + 0.6*clamp(lum/(lum + 1.5), 0.0, 1.0))
 				          * mix(1.0, 0.85 + 0.3*smoothstep(-0.1, 0.5, direction.y), uOvercast)
 				          + vec3(0.002, 0.003, 0.006) * uNight;
-				// the deck hides the bright Mie glow around the sun completely well before full cover
-				texColor = mix(texColor, deck, clamp(uOvercast*1.55, 0.0, 1.0));
+				// behind the volumetric clouds only a heavy deck greys the remaining gaps
+				texColor = mix(texColor, deck, smoothstep(0.55, 0.95, uOvercast));
+				// volumetric clouds (direction map): in front of sky, sun, moon and stars
+				if (direction.y > 0.0) {
+					// 4-tap lookup softens the per-texel march jitter
+					vec2 cuv = cloudMapUV(direction), ct = 0.35/vec2(textureSize(uCloudMap, 0));
+					vec4 cl = 0.25*(texture(uCloudMap, cuv + vec2(ct.x, ct.y)) + texture(uCloudMap, cuv + vec2(-ct.x, ct.y))
+					              + texture(uCloudMap, cuv + vec2(ct.x, -ct.y)) + texture(uCloudMap, cuv - ct));
+					texColor = texColor*cl.a + cl.rgb;
+				}
 				texColor += uFlash * vec3(0.5, 0.56, 0.72) * (0.35 + 0.65*smoothstep(-0.1, 0.35, direction.y));
 			}
 			gl_FragColor = vec4( texColor * uSkyScale, 1.0 );`;
@@ -89,6 +100,10 @@ export class Environment {
   exposure = 0.63;
   /** 0 by day … 1 at full night */
   night = 0;
+  /** light that reaches the cloud layer (the sun keeps lighting it a little after sunset) */
+  readonly cloudLightDir = new THREE.Vector3(0, 1, 0);
+  readonly cloudLight = new THREE.Vector3();
+  readonly cloudAmbient = new THREE.Vector3();
   /** 0 … 1 around sunrise / sunset (sky reddening, warm grade) */
   golden = 0;
 
@@ -106,6 +121,8 @@ export class Environment {
   private horizonPending = false;
   private readonly skyU: Record<string, THREE.IUniform>;
   private pinned: THREE.Vector3 | null = null;
+  private readonly fogTarget = new THREE.Color(0.6, 0.71, 0.82);
+  private fogInit = false;
 
   constructor(private readonly renderer: THREE.WebGLRenderer, private readonly scene: THREE.Scene) {
     this.sky = new Sky();
@@ -118,6 +135,7 @@ export class Environment {
     Object.assign(u, {
       uSkyScale: { value: 1 }, uNight: { value: 0 }, uOvercast: { value: 0 }, uFlash: { value: 0 },
       uMoonBright: { value: 0 }, uStarRot: { value: 0 }, uMoonDir: { value: new THREE.Vector3(0, -1, 0) },
+      uCloudMap: { value: null },
     });
     this.skyU = u;
     const fs = this.sky.material.fragmentShader;
@@ -173,8 +191,7 @@ export class Environment {
     u.rayleigh.value = 1.1 + 2.2 * gk;
     u.mieCoefficient.value = 0.004 + 0.003 * gk;
     u.mieDirectionalG.value = 0.82 + 0.07 * gk;
-    u.cloudCoverage.value = w.cloudCoverage;
-    u.cloudDensity.value = w.cloudDensity;
+    u.cloudCoverage.value = 0; // Preetham's 2D clouds are replaced by the volumetric layer
     u.time.value += dt * (0.4 + w.wind / 6);
     u.uNight.value = this.night;
     u.uOvercast.value = w.overcast;
@@ -185,7 +202,8 @@ export class Environment {
 
     // ---- the shading light: sun, or the moon once the sun is down ----
     const el = Math.asin(THREE.MathUtils.clamp(sunY, -1, 1));
-    const cloudDim = 1 - 0.9 * w.overcast;
+    // cloud shadows now darken the direct light where it matters; keep only a diffuse-deck share here
+    const cloudDim = 1 - 0.45 * w.overcast;
     let intensity: number;
     const color = new THREE.Color();
     if (sunY > -0.03) {
@@ -200,7 +218,8 @@ export class Environment {
       this.lightDir.copy(this.sunDir);
     } else {
       color.setRGB(0.62, 0.72, 1.0);
-      intensity = 0.3 * moonBright;
+      // fade the moon in only once the sun is well gone, so the switch of light source is invisible
+      intensity = 0.3 * moonBright * THREE.MathUtils.smoothstep(-sunY, 0.03, 0.12);
       this.lightDir.copy(this.moonDir);
     }
     if (this.lightDir.y < 0.02) this.lightDir.y = 0.02; // keep shadows sane when the light grazes the horizon
@@ -220,17 +239,36 @@ export class Environment {
       .multiplyScalar(1 - 0.5 * w.overcast)
       .addScalar(weather.flash * 1.2);
 
+    // clouds at 1–3 km still see the sun ~1–2° below the horizon: pink/red undersides after sunset
+    if (sunY > -0.05) {
+      const ce = Math.max(el, 0);
+      const cm = 1 / Math.max(Math.sin(ce) + 0.15 * Math.pow((ce * 180) / Math.PI + 3.885, -1.253), 0.02);
+      const haze = 1 + 0.9 * this.golden;
+      const ex = [0.016, 0.052, 0.13].map((k) => Math.exp(-k * cm * 1.2 * haze));
+      const k = 6 * THREE.MathUtils.smoothstep(sunY, -0.05, 0.02);
+      this.cloudLight.set(ex[0] * 1.08 * k, ex[1] * 0.95 * k, ex[2] * 0.8 * k);
+      this.cloudLightDir.copy(this.sunDir);
+      if (this.cloudLightDir.y < 0.01) { this.cloudLightDir.y = 0.01; this.cloudLightDir.normalize(); }
+    } else {
+      const k = 0.3 * moonBright;
+      this.cloudLight.set(0.62 * k, 0.72 * k, 1.0 * k);
+      this.cloudLightDir.copy(this.moonDir);
+    }
+    this.cloudAmbient.copy(this.skyIrradiance).multiplyScalar(0.55 / (1 - 0.5 * w.overcast));
     this.flashLight.intensity = weather.flash * 2.2;
     this.fogDensity = w.fog;
+    this.fogColor.lerp(this.fogTarget, 1 - Math.exp(-dt * 2.5));
 
     // simple eye adaptation: the key light of the scene sets the exposure
     const key = intensity * 0.5 + (this.skyIrradiance.x + this.skyIrradiance.y + this.skyIrradiance.z) * 1.4;
     const target = 0.63 * THREE.MathUtils.clamp(Math.pow(4.8 / Math.max(key, 0.01), 0.33), 0.9, 2.6);
-    this.exposure += (target - this.exposure) * (1 - Math.exp(-dt * 1.5));
+    // (dt = 0 on the very first update: start at the target instead of adapting from a default)
+    this.exposure += (target - this.exposure) * (dt === 0 ? 1 : 1 - Math.exp(-dt * 1.5));
 
     // IBL + fog colour: refresh periodically (they follow a slowly changing sky)
     this.envAge += dt;
-    if (this.envAge > 1.2 || this.lastEnvLight.distanceTo(this.lightDir) > 0.05) {
+    const fastSky = Math.abs(sunY) < 0.3 || weather.flash > 0; // twilight: the sky changes quickly
+    if (this.envAge > (fastSky ? 0.4 : 1.5) || this.lastEnvLight.distanceTo(this.lightDir) > 0.05) {
       this.envAge = 0;
       this.lastEnvLight.copy(this.lightDir);
       this.refreshEnvironment();
@@ -270,13 +308,22 @@ export class Environment {
     this.horizonRT.viewport.set(0, 0, 64, 4);
     disc.value = 1;
     r.setRenderTarget(prevTarget);
-    this.horizonPending = true;
     const px = new Float32Array(64 * 4 * 4);
+    if (!this.fogInit) {
+      // the very first measurement is synchronous (once, at start-up) so the first frames already have
+      // the right haze instead of a default blue that snaps a moment later
+      r.readRenderTargetPixels(this.horizonRT, 0, 0, 64, 4, px);
+      let x = 0, y = 0, z = 0;
+      for (let j = 0; j < 64 * 4; j++) { x += px[j * 4]; y += px[j * 4 + 1]; z += px[j * 4 + 2]; }
+      if (Number.isFinite(x + y + z)) { this.fogTarget.setRGB(x / 256, y / 256, z / 256); this.fogColor.copy(this.fogTarget); this.fogInit = true; }
+      return;
+    }
+    this.horizonPending = true;
     r.readRenderTargetPixelsAsync(this.horizonRT, 0, 0, 64, 4, px).then(() => {
       let x = 0, y = 0, z = 0;
       for (let j = 0; j < 64 * 4; j++) { x += px[j * 4]; y += px[j * 4 + 1]; z += px[j * 4 + 2]; }
       const n = 64 * 4;
-      if (Number.isFinite(x + y + z)) this.fogColor.setRGB(x / n, y / n, z / n);
+      if (Number.isFinite(x + y + z)) { this.fogTarget.setRGB(x / n, y / n, z / n); if (!this.fogInit) { this.fogColor.copy(this.fogTarget); this.fogInit = true; } }
       this.horizonPending = false;
     }, () => { this.horizonPending = false; });
   }

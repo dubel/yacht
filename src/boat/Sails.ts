@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CLOUD_SHADOW_GLSL, cloudShadowUniforms } from '../environment/Clouds';
 
 /*
  * Procedural sails for the Amadis rig (single mast: gaff mainsail, three square sails, two headsails).
@@ -233,9 +234,14 @@ export class Sails {
     });
     // a little light through the cloth when backlit
     material.onBeforeCompile = (sh) => {
-      sh.fragmentShader = sh.fragmentShader.replace(
+      Object.assign(sh.uniforms, cloudShadowUniforms);
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', '#include <common>\nvarying vec3 vCloudWP;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvCloudWP = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vCloudWP;\n' + CLOUD_SHADOW_GLSL).replace(
         '#include <lights_fragment_end>',
         `#include <lights_fragment_end>
+        reflectedLight.directDiffuse *= cloudShadow(vCloudWP);
         reflectedLight.indirectDiffuse += diffuseColor.rgb * 0.18 * max(-dot(normal, directionalLights[0].direction), 0.0) * directionalLights[0].color;`,
       );
     };

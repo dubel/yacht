@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GERSTNER_GLSL, MAX_WAVES, WaveField } from '../../environment/WaveField';
 import { WATER_OPTICS_GLSL } from './optics';
+import { CLOUD_SHADOW_GLSL, cloudShadowUniforms } from '../../environment/Clouds';
 
 /*
  * The visible water surface: a camera-centred radial grid displaced by the shared Gerstner waves
@@ -48,13 +49,14 @@ uniform mat4 uReflMatrix, uViewProj, uInvViewProj;
 uniform vec2 uResolution;
 uniform vec3 uCamFwd;
 uniform float uNear, uFar;
-uniform vec3 uSunDir, uSunRad, uSkyIrr, uFogColor;
+uniform vec3 uSunDir, uSunRadIn, uSkyIrr, uFogColor;
 uniform float uFogDensity, uTime, uL, uRipSize;
 uniform vec2 uRipCenter;
 uniform int uView;
 uniform float uChop, uWhitecaps, uRain;
 ${GERSTNER_GLSL}
 ${WATER_OPTICS_GLSL}
+${CLOUD_SHADOW_GLSL}
 varying vec3 vWorld;
 varying vec2 vParam;
 varying float vCrest;
@@ -104,6 +106,8 @@ vec3 worldFromDepth(vec2 uv, float d){ vec4 w = uInvViewProj*vec4(uv*2.0-1.0, d*
 
 void main(){
   vec3 P = vWorld;
+  // cloud shadows: the direct light that reaches this bit of water (glints, in-scatter, foam)
+  vec3 uSunRad = uSunRadIn*cloudShadow(P);
   vec3 toCam = cameraPosition - P;
   float dist = length(toCam);
   vec3 v = toCam/dist, wd = -v;
@@ -298,6 +302,7 @@ export class WaterSurface {
 
   constructor(waves: WaveField, surface: THREE.Texture, L: number) {
     this.uniforms = {
+      ...cloudShadowUniforms,
       uGridCenter: { value: new THREE.Vector2() },
       uSurf: { value: surface },
       uRip: { value: null },
@@ -318,7 +323,7 @@ export class WaterSurface {
       uNear: { value: 0.1 },
       uFar: { value: 1000 },
       uSunDir: { value: new THREE.Vector3(0, 1, 0) },
-      uSunRad: { value: new THREE.Vector3(6, 5.4, 4.4) },
+      uSunRadIn: { value: new THREE.Vector3(6, 5.4, 4.4) },
       uSkyIrr: { value: new THREE.Vector3(0.43, 0.48, 0.54) },
       uFogColor: { value: new THREE.Color() },
       uFogDensity: { value: 0.001 },
