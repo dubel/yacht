@@ -28,13 +28,17 @@ export class GameTime {
   dayLength: number;
   /** 0 = new moon, 0.5 = full */
   moonPhase0 = 0.42;
+  /** P key: stop the clock (admire a sunset) */
+  paused = false;
 
   readonly sunDir = new THREE.Vector3();
   readonly moonDir = new THREE.Vector3();
 
-  constructor(hours: number, dayLengthSec: number) {
+  constructor(hours: number, dayLengthSec: number, moonPhase: number | null = null, paused = false) {
     this.hours = ((hours % 24) + 24) % 24;
     this.dayLength = dayLengthSec;
+    if (moonPhase !== null) this.moonPhase0 = ((moonPhase % 1) + 1) % 1;
+    this.paused = paused;
     this.compute();
   }
 
@@ -48,7 +52,7 @@ export class GameTime {
   }
 
   update(dt: number): void {
-    if (this.dayLength > 0) this.advance((dt / this.dayLength) * 24);
+    if (this.dayLength > 0 && !this.paused) this.advance((dt / this.dayLength) * 24);
     this.compute();
   }
 

@@ -25,6 +25,7 @@ Wymaga WebGL2 z `EXT_color_buffer_float` (każdy współczesny desktop, większo
 | `V` | zanurz kamerę pod łódź / wynurz |
 | `N` | następna pogoda (blokuje automatyczne zmiany) |
 | `[` / `]` | czas −1 h / +1 h |
+| `P` | zatrzymaj / wznów upływ czasu (np. żeby napawać się zachodem) |
 | `M` | wycisz dźwięk (dźwięk startuje po pierwszym kliknięciu / klawiszu — wymóg przeglądarek) |
 | `R` | reset łodzi |
 | `F1` | panel debug |
@@ -42,6 +43,8 @@ Doba trwa 7 minut. Pogoda zmienia się sama (pogodnie → pochmurno → deszcz �
 | `time` | godzina startu | `?time=18:30`, `?time=6` |
 | `weather` | pogoda: `clear`/`pogodnie`, `cloudy`/`pochmurno`, `rain`/`deszcz`, `storm`/`burza`, `gale`/`sztorm`, `fog`/`mgla`, `auto` | `?weather=burza` |
 | `daylen` | długość doby w minutach (`0` = zatrzymany zegar) | `?daylen=2` |
+| `pause` | start z zatrzymanym zegarem | `?time=17:45&pause` |
+| `moon` | faza księżyca: 0 nów, 0.25 pierwsza kwadra, 0.5 pełnia, 0.75 ostatnia kwadra | `?moon=0.25` |
 
 Np. zachód słońca w sztormie: `?time=17:40&weather=sztorm`, noc przy pełni: `?time=21&weather=pogodnie`.
 

@@ -34,7 +34,7 @@ export class Game {
   readonly scene = new THREE.Scene();
   readonly input: Input;
   readonly wind = new Wind();
-  readonly clock = new GameTime(Config.startTime, Config.dayLengthSec);
+  readonly clock = new GameTime(Config.startTime, Config.dayLengthSec, Config.moonPhase, Config.paused);
   readonly weather = new Weather(Config.weather && Config.weather !== 'auto' ? Config.weather : 'clear', !Config.weather || Config.weather === 'auto');
   readonly waves: WaveField;
   readonly env: Environment;
@@ -179,6 +179,7 @@ export class Game {
     if (inp.wasPressed('KeyV')) this.cam.toggleDive();
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
+    if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
     if (inp.wasPressed('BracketRight')) this.clock.advance(1);
     if (inp.wasPressed('BracketLeft')) this.clock.advance(-1);
   }
@@ -206,6 +207,7 @@ export class Game {
     fog.color.copy(this.env.fogColor);
     fog.density = this.env.fogDensity;
     this.pipeline.post.exposure = this.env.exposure;
+    this.pipeline.post.golden = this.env.golden;
 
     // --- simulation ---
     this.physics.update(stepDt, t, this.input);

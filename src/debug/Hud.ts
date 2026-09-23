@@ -19,7 +19,7 @@ export class Hud {
       '<kbd>A</kbd>/<kbd>D</kbd> ster &nbsp; <kbd>W</kbd>/<kbd>S</kbd> wybierz / luzuj szot',
       '<kbd>T</kbd> auto-trym &nbsp; <kbd>Spacja</kbd> zwiń / postaw żagle',
       'mysz: obrót kamery, kółko: zoom &nbsp; <kbd>V</kbd> pod wodę &nbsp; <kbd>R</kbd> reset',
-      '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>M</kbd> dźwięk',
+      '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>H</kbd> ukryj',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',
     ].join('<br>');
@@ -54,7 +54,7 @@ export class Hud {
     const row = (k: string, v: string) => `<div class="row"><span class="k">${k}</span><span>${v}</span></div>`;
     this.el.innerHTML =
       svg +
-      row('czas', `${g.clock.label} · ${g.weather.name}${g.weather.auto ? '' : ' 🔒'}`) +
+      row('czas', `${g.clock.label}${g.clock.paused ? ' ⏸' : ''} · ${g.weather.name}${g.weather.auto ? '' : ' 🔒'}`) +
       row('prędkość', `${(p.speed * 1.943844).toFixed(1)} kn`) +
       row('kurs', `${deg(p.bearing).toFixed(0).padStart(3, '0')}°`) +
       row('wiatr', `${(g.wind.speed * 1.943844).toFixed(0)} kn · ${Math.abs(deg(p.twa)).toFixed(0)}°`) +

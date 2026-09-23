@@ -7,6 +7,8 @@ import { Blitter, makeRT, passMaterial } from './gpu';
  */
 export class PostProcessor {
   exposure = 0.63;
+  /** 0..1 golden-hour grade (warm highlights, violet shadows, more bloom) */
+  golden = 0;
   private qA!: THREE.WebGLRenderTarget;
   private qB!: THREE.WebGLRenderTarget;
   private b1!: THREE.WebGLRenderTarget;
@@ -45,7 +47,7 @@ uniform sampler2D uSrc; uniform float uK;
 void main(){ o = vec4(texture(uSrc,vUv).rgb*uK, 1); }`, { uSrc: { value: null }, uK: { value: 1 } });
 
     this.final = passMaterial(/* glsl */ `
-uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime;
+uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden;
 vec3 bicubic(sampler2D t, vec2 uv){
   vec2 ts = vec2(textureSize(t,0)); vec2 p = uv*ts - 0.5; vec2 f = fract(p); p = floor(p);
   vec2 w0 = f*(-0.5+f*(1.0-0.5*f)), w1 = 1.0+f*f*(-2.5+1.5*f), w2 = f*(0.5+f*(2.0-1.5*f)), w3 = f*f*(-0.5+0.5*f);
@@ -59,8 +61,16 @@ void main(){
   vec2 cc = uv-0.5; float ca = 0.0012*dot(cc,cc)*4.0;
   vec3 c;
   c.r = texture(uHdr, uv + cc*ca).r; c.g = texture(uHdr, uv).g; c.b = texture(uHdr, uv - cc*ca).b;
-  c += texture(uB1, uv).rgb * 0.035 + bicubic(uB2, uv) * 0.035;
+  float bloom = 0.035 + 0.05*uGolden;
+  c += texture(uB1, uv).rgb * bloom + bicubic(uB2, uv) * bloom;
   c *= uExp;
+  // golden hour: split-tone — warm the highlights, push the shadows toward violet
+  {
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float hi = smoothstep(0.05, 0.8, l);
+    vec3 warm = c * mix(vec3(0.92, 0.9, 1.08), vec3(1.14, 0.98, 0.8), hi);
+    c = mix(c, warm, uGolden);
+  }
   float vig = 1.0 - 0.22*dot(cc*vec2(1.0,0.8), cc*vec2(1.0,0.8))*2.2;
   c *= vig;
   c = aces(c);
@@ -71,7 +81,7 @@ void main(){
   float g = hash(gl_FragCoord.xy + fract(uTime*7.13)*917.0) - 0.5;
   c += g * 0.014 * (1.0 - c*0.6);
   o = vec4(c, 1);
-}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 } });
+}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 } });
   }
 
   setSize(w: number, h: number): void {
@@ -98,7 +108,7 @@ void main(){
     }
     const f = this.final.uniforms;
     f.uHdr.value = hdr; f.uB1.value = this.b1.texture; f.uB2.value = this.b2.texture;
-    f.uExp.value = this.exposure; f.uTime.value = time;
+    f.uExp.value = this.exposure; f.uTime.value = time; f.uGolden.value = this.golden;
     blit.run(this.final, null);
   }
 

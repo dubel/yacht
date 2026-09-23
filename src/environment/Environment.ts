@@ -48,7 +48,9 @@ const SKY_PATCH_NIGHT = /* glsl */ `
 					float maria = 0.78 + 0.22*smoothstep(0.3, 0.7, skyHash(floor(o*3.0 + 7.0)));
 					vec3 moonC = vec3(1.0, 0.96, 0.88) * (lit*maria*1.9 + 0.02);
 					float disc = smoothstep(1.0, 0.86, r2);
-					texColor = mix(texColor, moonC*(0.35 + 0.65*night), disc*vis);
+					// by day the lit part adds to the sky and the dark part is simply sky
+					vec3 moonPix = moonC*(0.45 + 0.55*night) + texColor*(1.0 - night)*0.92;
+					texColor = mix(texColor, moonPix, disc*vis);
 				}
 				texColor += vec3(0.55, 0.65, 0.9) * pow(max(md, 0.0), 900.0) * 0.18 * uMoonBright * vis * night;
 			}
@@ -87,6 +89,8 @@ export class Environment {
   exposure = 0.63;
   /** 0 by day … 1 at full night */
   night = 0;
+  /** 0 … 1 around sunrise / sunset (sky reddening, warm grade) */
+  golden = 0;
 
   readonly sky: Sky;
   readonly light: THREE.DirectionalLight;
@@ -156,11 +160,19 @@ export class Environment {
     this.moonDir.copy(time.moonDir);
     const sunY = this.sunDir.y, moonY = this.moonDir.y;
     this.night = THREE.MathUtils.smoothstep(-sunY, -0.02, 0.2);
+    // golden hour: sun within ~20° of the horizon, fading out once it is well below
+    this.golden = (1 - THREE.MathUtils.smoothstep(sunY, 0.06, 0.34)) * THREE.MathUtils.smoothstep(sunY, -0.14, -0.01) * (1 - 0.8 * w.overcast);
     const moonBright = time.moonLit * THREE.MathUtils.smoothstep(moonY, -0.02, 0.12);
 
     // ---- sky ----
     const u = this.skyU;
     u.sunPosition.value.copy(this.sunDir);
+    // a hazier, dustier evening atmosphere: longer red light paths, stronger forward glow around the sun
+    const gk = this.golden;
+    u.turbidity.value = 2.2 + 5.5 * gk;
+    u.rayleigh.value = 1.1 + 2.2 * gk;
+    u.mieCoefficient.value = 0.004 + 0.003 * gk;
+    u.mieDirectionalG.value = 0.82 + 0.07 * gk;
     u.cloudCoverage.value = w.cloudCoverage;
     u.cloudDensity.value = w.cloudDensity;
     u.time.value += dt * (0.4 + w.wind / 6);
@@ -179,9 +191,12 @@ export class Environment {
     if (sunY > -0.03) {
       // warm, dimmer sun near the horizon (cheap air-mass approximation)
       const m = 1 / Math.max(Math.sin(Math.max(el, 0)) + 0.15 * Math.pow(Math.max((el * 180) / Math.PI + 3.885, 0.01), -1.253), 0.02);
-      const ext = [0.02, 0.045, 0.1].map((k) => Math.exp(-k * m * 1.2));
-      color.setRGB(ext[0] * 1.05, ext[1] * 0.97, ext[2] * 0.86);
-      intensity = 6 * THREE.MathUtils.smoothstep(el, -0.03, 0.07);
+      // extinction coefficients grow with the evening haze → a deeper red sun
+      const haze = 1 + 0.9 * this.golden;
+      const ext = [0.016, 0.052, 0.13].map((k) => Math.exp(-k * m * 1.2 * haze));
+      color.setRGB(ext[0] * 1.08, ext[1] * 0.95, ext[2] * 0.8);
+      // keep the low sun strong enough to paint the scene
+      intensity = 6 * THREE.MathUtils.smoothstep(el, -0.03, 0.07) * (1 + 0.6 * this.golden);
       this.lightDir.copy(this.sunDir);
     } else {
       color.setRGB(0.62, 0.72, 1.0);
@@ -197,9 +212,10 @@ export class Environment {
 
     // sky irradiance: daylight → twilight → moonlit night, dimmed by the cloud deck
     const day = THREE.MathUtils.smoothstep(sunY, -0.12, 0.3);
-    const dusk = THREE.MathUtils.smoothstep(sunY, -0.15, 0.02) * (1 - THREE.MathUtils.smoothstep(sunY, 0.02, 0.25));
+    const dusk = Math.max(this.golden, THREE.MathUtils.smoothstep(sunY, -0.15, 0.02) * (1 - THREE.MathUtils.smoothstep(sunY, 0.02, 0.25)));
     this.skyIrradiance.set(0.43, 0.48, 0.54).multiplyScalar(day)
-      .add(new THREE.Vector3(0.1, 0.07, 0.09).multiplyScalar(dusk))
+      // warm afterglow from the red half of the sky lights everything from the sunset side
+      .add(new THREE.Vector3(0.34, 0.15, 0.1).multiplyScalar(dusk))
       .add(new THREE.Vector3(0.004, 0.006, 0.013).multiplyScalar(1 + 3 * moonBright))
       .multiplyScalar(1 - 0.5 * w.overcast)
       .addScalar(weather.flash * 1.2);
