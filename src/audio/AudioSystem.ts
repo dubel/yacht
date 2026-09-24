@@ -22,7 +22,6 @@ export interface AudioState {
   /** 0 open water … 1 right at a beach */
   shore: number;
   waves: number;
-  daylight: number;
 }
 
 export interface ThunderEvent {
@@ -50,7 +49,6 @@ export class AudioSystem {
   private whistle!: { gain: GainNode; band: BiquadFilterNode };
   private rush!: { gain: GainNode; low: BiquadFilterNode };
   private flog!: { gain: GainNode; lfo: OscillatorNode };
-  private gullT = 6;
   private creakT = 4;
   private foot = 1;
   private motion = 0;
@@ -224,6 +222,14 @@ export class AudioSystem {
     click.connect(cb).connect(cg).connect(this.muffle);
   }
 
+  /** a gull calls from a real bird: pan −1…1 (listener's left…right), distance in m */
+  gull(pan: number, distance: number): void {
+    if (!this.ctx) return;
+    const g = (['gull-1', 'gull-2', 'gull-3'] as const)[Math.floor(Math.random() * 3)];
+    const near = Math.min(1, 30 / (distance + 8));
+    this.play(g, 0.15 + 0.55 * near, { pan: pan * 0.8, rate: 0.9 + Math.random() * 0.25, lowpass: 2500 + 12000 * near });
+  }
+
   /** a lightning strike: the thunder arrives at the speed of sound, duller from far away */
   thunder(e: ThunderEvent): void {
     if (!this.ctx) return;
@@ -263,14 +269,6 @@ export class AudioSystem {
     loop('creak-loop', 0.05 + Math.min(0.5, s.motion * 1.6) * (0.5 + 0.2 * s.waves));
 
     // occasional one-shots
-    this.gullT -= dt;
-    if (this.gullT <= 0) {
-      this.gullT = 7 + Math.random() * 18;
-      if (s.daylight > 0.5 && s.rain < 0.1 && !under && Math.random() < 0.3 + 0.7 * s.shore) {
-        const g = (['gull-1', 'gull-2', 'gull-3'] as const)[Math.floor(Math.random() * 3)];
-        this.play(g, 0.25 + 0.35 * s.shore, { pan: Math.random() * 1.6 - 0.8, rate: 0.9 + Math.random() * 0.25 });
-      }
-    }
     this.creakT -= dt;
     if (this.creakT <= 0) {
       this.creakT = 2 + Math.random() * 6;

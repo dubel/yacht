@@ -23,6 +23,7 @@ import { Discovery } from '../map/Discovery';
 import { MapUI } from '../map/MapUI';
 import { DeckMap } from '../boat/DeckMap';
 import { FishLife } from '../life/Fish';
+import { Gulls } from '../life/Gulls';
 import { DeckWalker } from '../camera/DeckWalker';
 import { LENS_R, Spyglass } from '../camera/Spyglass';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
@@ -69,6 +70,7 @@ export class Game {
   mission!: Mission;
   readonly markers = new ChannelMarkers();
   readonly fish = new FishLife();
+  readonly gulls = new Gulls();
   readonly discovery = new Discovery(Config.worldSeed);
   map!: MapUI;
   physics!: BoatPhysics;
@@ -180,7 +182,8 @@ export class Game {
     this.physics = new BoatPhysics(this.boat.info, this.waves, this.wind, (x, z) => this.terrain.heightAt(x, z));
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
-    this.scene.add(this.mission.group, this.markers.group, this.fish.mesh);
+    this.scene.add(this.mission.group, this.markers.group, this.fish.mesh, this.gulls.mesh);
+    this.gulls.onCall = (pan, d) => this.audio.gull(pan, d);
     this.map = new MapUI(this.discovery, Config.worldSeed);
     progress(1);
 
@@ -284,6 +287,14 @@ export class Game {
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
     this.fish.update(stepDt, body.origin, body.origin, 1 - this.env.night);
+    {
+      // gulls: a follower trails ~16 m astern; they keep away at night and in rain or heavy weather
+      const o = body.origin, h = body.heading;
+      const stern = new THREE.Vector3(o.x - Math.sin(h) * 16, 0, o.z - Math.cos(h) * 16);
+      const ok = this.env.night < 0.3 && wp.rain < 0.15 && wp.wind < 13;
+      const cam = this.cam.camera, right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+      this.gulls.update(stepDt, t, o, stern, body.speed, ok, this.waves, cam.position, right);
+    }
     this.discovery.update(dt, body.origin.x, body.origin.z);
     this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading });
 
@@ -343,7 +354,7 @@ export class Game {
     this.audio.update(dt, {
       windSpeed: this.wind.speed, rain: wp.rain, speed: body.speed, motion: Math.hypot(av.x, av.z),
       luffing: body.luffing, sailsUp: body.sailsUp, submerged, night: this.env.night, shore: this.shore,
-      waves: wp.waves, daylight: 1 - this.env.night,
+      waves: wp.waves,
     });
 
     this.hud.update(this);
