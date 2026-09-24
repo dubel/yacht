@@ -1,12 +1,9 @@
 import type { Game } from '../core/Game';
-import { fmt } from '../gameplay/Mission';
 
 /** Sailing instruments: speed, heading, wind rose relative to the boat, trim, heel. */
 export class Hud {
   private readonly el = document.getElementById('hud')!;
   private readonly help = document.getElementById('help')!;
-  private readonly missionEl = document.getElementById('mission')!;
-  private readonly toast = document.getElementById('toast')!;
   private tick = 0;
   /** the controls panel (F8), remembered between sessions */
   private helpOn = (() => { try { return localStorage.getItem('lagoon.help') !== 'off'; } catch { return true; } })();
@@ -14,7 +11,6 @@ export class Hud {
   constructor() {
     this.el.hidden = false;
     this.help.hidden = !this.helpOn;
-    this.missionEl.hidden = false;
     this.help.innerHTML = [
       '<b>Sterowanie</b> <span class="tog">(<kbd>F8</kbd> — pokaż / ukryj)</span>',
       '<kbd>A</kbd>/<kbd>D</kbd> ster &nbsp; <kbd>W</kbd>/<kbd>S</kbd> wybierz / luzuj szot',
@@ -71,27 +67,7 @@ export class Hud {
       row('przechył', `${Math.abs(deg(p.heel)).toFixed(0)}°`) +
       (p.sailsUp < 0.5 ? row('żagle', 'zwinięte') : '') +
       (p.grounded ? row('⚠', 'mielizna!') : '');
-    this.updateMission(g);
     const sh = document.getElementById('sndhint');
     if (sh) sh.textContent = g.audio.started ? (g.audio.muted ? '🔇 dźwięk wyciszony (M)' : '🔊 dźwięk włączony (M wycisza)') : '🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk';
-  }
-
-  private updateMission(g: Game): void {
-    const m = g.mission, p = g.physics;
-    const o = p.origin;
-    const tgt = m.target(o);
-    let next = '';
-    if (tgt) {
-      // arrow relative to the bow: 0 = straight ahead
-      const want = Math.atan2(tgt.x - o.x, tgt.z - o.z);
-      let rel = want - p.heading;
-      rel = Math.atan2(Math.sin(rel), Math.cos(rel));
-      next = `<div class="next"><svg class="arrow" viewBox="0 0 18 18" style="transform:rotate(${(-rel * 180) / Math.PI}deg)"><path d="M9 1 L15 15 L9 11 L3 15 Z" fill="#ffd27a"/></svg>${tgt.name} · ${tgt.dist.toFixed(0)} m</div>`;
-    }
-    const list = m.marks.map((k) => `<div class="${k.done ? 'done' : ''}">${k.done ? '✓' : '○'} ${k.name}</div>`).join('');
-    const back = m.remaining === 0 ? `<div class="${m.finished ? 'done' : ''}">${m.finished ? '✓' : '○'} Powrót na start</div>` : '';
-    this.missionEl.innerHTML = `<div class="t"><span>${fmt(m.elapsed)}</span><span style="opacity:.6">${m.best !== null ? 'rekord ' + fmt(m.best) : ''}</span></div>${list}${back}${next}`;
-    if (m.message) this.toast.textContent = m.message;
-    this.toast.classList.toggle('on', !!m.message);
   }
 }

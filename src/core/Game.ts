@@ -18,7 +18,6 @@ import { Weather } from '../environment/Weather';
 import { WeatherFX } from '../environment/WeatherFX';
 import { BANDS, Clouds, cloudShadowUniforms } from '../environment/Clouds';
 import { Terrain } from '../world/Terrain';
-import { ChannelMarkers } from '../world/ChannelMarkers';
 import { Discovery } from '../map/Discovery';
 import { MapUI } from '../map/MapUI';
 import { DeckMap } from '../boat/DeckMap';
@@ -40,7 +39,8 @@ import { terrainHeight as landAt } from '../world/WorldGen';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
 import { placeName } from '../map/names';
 import { Vegetation } from '../world/Vegetation';
-import { Mission } from '../gameplay/Mission';
+import { Messages } from '../gameplay/Messages';
+import { Surf } from '../world/Surf';
 import { Boat } from '../boat/Boat';
 import { BoatPhysics } from '../physics/BoatPhysics';
 import { SailingCamera } from '../camera/SailingCamera';
@@ -78,8 +78,9 @@ export class Game {
   private readonly flashDir = new THREE.Vector3(1, 0.2, 0);
   terrain!: Terrain;
   vegetation!: Vegetation;
-  mission!: Mission;
-  readonly markers = new ChannelMarkers();
+  /** short messages across the screen */
+  readonly messages = new Messages();
+  surf!: Surf;
   readonly fish = new FishLife();
   readonly gulls = new Gulls();
   readonly dolphins = new Dolphins();
@@ -230,6 +231,10 @@ export class Game {
     };
     this.scene.add(this.artillery.balls);
     this.pipeline.late.add(this.artillery.late);
+    // surf breaking on the reefs (the white line; a pass is the gap in it)
+    const wu = this.water.uniforms;
+    this.surf = new Surf({ uWaveA: wu.uWaveA, uWaveB: wu.uWaveB, uWaveTime: wu.uWaveTime });
+    this.pipeline.late.add(this.surf.group);
     this.artillery.onFire = (x, _y, z) => {
       const h = this.heardFrom(x, z);
       this.audio.cannon(h.pan, h.d);
@@ -249,7 +254,7 @@ export class Game {
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
     // aground: kedging off (K); underway: the leadsman sounding ahead
     this.kedge = new Kedge(this.physics, {
-      say: (text, s) => this.mission.say(text, s),
+      say: (text, s) => this.messages.say(text, s),
       oar: (at) => { const h = this.heardFrom(at.x, at.z); this.audio.oar(h.pan, h.d); },
       anchor: (at) => { const h = this.heardFrom(at.x, at.z); this.audio.anchorDrop(h.pan, h.d); this.splash.burst(at.x, 0.1, at.z, 25, 4); this.ripples.disturb(at.x, at.z, 0.8, 0.12); },
       capstan: () => this.audio.capstan(),
@@ -258,8 +263,7 @@ export class Game {
     }, () => this.discovery.track);
     this.scene.add(this.kedge.group);
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
-    this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
-    this.scene.add(this.mission.group, this.markers.group, this.fish.mesh, this.gulls.mesh);
+    this.scene.add(this.fish.mesh, this.gulls.mesh);
     this.gulls.onCall = (pan, d) => this.audio.gull(pan, d);
     this.scene.add(this.dolphins.mesh, this.splash.points);
     if (!this.fauna) this.setFauna(false, true);
@@ -345,7 +349,7 @@ export class Game {
       }
     }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
-    if (inp.wasPressed('F7')) this.mission.say(this.music.toggle() ? 'Muzyka włączona (F7)' : 'Muzyka wyłączona (F7)', 2.5);
+    if (inp.wasPressed('F7')) this.messages.say(this.music.toggle() ? 'Muzyka włączona (F7)' : 'Muzyka wyłączona (F7)', 2.5);
     // 1 pistol, 2 rapier, 3 lantern (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
     const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit3') ? 'lantern' : inp.wasPressed('Digit0') ? 'spyglass' : null;
     if (slot && !this.map.open) {
@@ -417,18 +421,17 @@ export class Game {
       const sky = this.env.skyIrradiance;
       this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t, (sky.x + sky.y + sky.z) / 3);
     }
-    this.mission.update(stepDt, t, body.origin, this.waves);
-    this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
+    this.messages.update(stepDt);
     this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
     // a squall coming on: the call to strike sail; laid over past ~78°: the crew lets everything fly
     if (this.weather.kind !== this.lastWeather) {
-      if (this.weather.kind === 'squall') this.mission.say('Biały szkwał! Zrzucić żagle (X)!', 5);
+      if (this.weather.kind === 'squall') this.messages.say('Biały szkwał! Zrzucić żagle (X)!', 5);
       this.lastWeather = this.weather.kind;
     }
     this.knockT = Math.abs(body.heel) > (78 * Math.PI) / 180 ? this.knockT + stepDt : 0;
     if (this.knockT > 0.4 && body.sailsUp > 0.2) {
       body.dropSails();
-      this.mission.say('Szkwał kładzie statek na burtę! Załoga puszcza szoty i zrzuca żagle!', 5);
+      this.messages.say('Szkwał kładzie statek na burtę! Załoga puszcza szoty i zrzuca żagle!', 5);
     }
     {
       const o = body.origin, h = body.heading, bow = this.boat.info.hullBow;
@@ -454,6 +457,8 @@ export class Game {
       this.guns.relax(stepDt, this.gunSight.active ? this.gunSight.gun : -1);
       const wv = { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed };
       this.musketry.update(stepDt, t, this.waves);
+      this.surf.update(stepDt, this.cam.camera.position, 0.8 + 0.06 * wp.waves + 0.25 * wp.whitecaps, sun, sky, this.env.fogColor, this.env.fogDensity,
+        this.pipeline.sceneDepth, new THREE.Vector2(this.pipeline.width, this.pipeline.height), cam);
       this.artillery.update(stepDt, t, this.waves, wv, cam, this.pipeline.sceneDepth, new THREE.Vector2(this.pipeline.width, this.pipeline.height), sun, sky);
     }
     this.discovery.update(dt, body.origin.x, body.origin.z);
@@ -588,7 +593,7 @@ export class Game {
     this.fauna = on;
     for (const o of [this.fish.mesh, this.gulls.mesh, this.dolphins.mesh]) o.visible = on;
     try { localStorage.setItem('lagoon.fauna', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
-    if (!quiet) this.mission.say(on ? 'Fauna włączona (F9)' : 'Fauna wyłączona (F9)', 2.5);
+    if (!quiet) this.messages.say(on ? 'Fauna włączona (F9)' : 'Fauna wyłączona (F9)', 2.5);
   }
 
   private readonly gunHint = (() => {

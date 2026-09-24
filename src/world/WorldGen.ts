@@ -287,42 +287,16 @@ export function featuresNear(x: number, z: number, radius: number): { kind: stri
       : { kind: f === HOME_FEATURE ? 'home' : 'atoll', x: f.lag.x, z: f.lag.z, radius: f.lag.radius });
 }
 
-/** a lateral mark at a reef pass; `port` = red (left side when entering the lagoon from the sea, IALA A) */
-export interface Gate {
-  x: number;
-  z: number;
-  port: boolean;
+/** the ring reefs (lagoons, the home one included) within `radius` of (x, z) */
+export function reefsNear(x: number, z: number, radius: number): Lagoon[] {
+  return featuresIn(x - radius, z - radius, x + radius, z + radius, []).filter((f) => f.kind === 'lagoon').map((f) => (f as { lag: Lagoon }).lag);
 }
 
-/** channel marks for every reef pass of the lagoons within `radius` of (x, z) */
-export function gatesNear(x: number, z: number, radius: number): Gate[] {
-  const out: Gate[] = [];
-  for (const f of featuresIn(x - radius, z - radius, x + radius, z + radius, [])) {
-    if (f.kind !== 'lagoon') continue;
-    const L = f.lag;
-    // the pass is fully open within 0.08·430/R rad of its axis (see lagoonHeight): marks just inside that
-    const half = (0.075 * 430) / L.radius;
-    for (const a of L.passes) {
-      // point on the (elliptical) reef line at angle b
-      const onRing = (b: number, k = 1) => {
-        const t = (L.radius * k) / Math.hypot(Math.cos(b) / L.ellipse, Math.sin(b));
-        return [L.x + Math.cos(b) * t, L.z + Math.sin(b) * t];
-      };
-      const [cx, cz] = onRing(a);
-      // entering = heading toward the lagoon centre; port side = left of that heading (y up: left = (fz, −fx))
-      const fx = L.x - cx, fz = L.z - cz;
-      for (const side of [-1, 1]) {
-        let [gx, gz] = onRing(a + side * half);
-        // keep the mark in navigable water: slide toward the pass axis if it sits on the reef
-        for (let k = 0; k < 8 && terrainHeight(gx, gz) > -2.5; k++) {
-          gx += (cx - gx) * 0.2;
-          gz += (cz - gz) * 0.2;
-        }
-        out.push({ x: gx, z: gz, port: (gx - cx) * fz - (gz - cz) * fx > 0 });
-      }
-    }
-  }
-  return out;
+/** 0 on solid reef … 1 in the middle of a pass, at angle `a` round lagoon `L` (as the heightfield cuts them) */
+export function passOpening(L: Lagoon, a: number): number {
+  let pass = 0;
+  for (const p of L.passes) pass = Math.max(pass, smoothstep(0.22, 0.08, angDiff(a, p) * (430 / L.radius)));
+  return pass;
 }
 
 // ---------------------------------------------------------------- surface colour (vertex colours)
