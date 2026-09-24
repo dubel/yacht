@@ -30,6 +30,15 @@ const VEG_FULL_IN = 110, VEG_FULL_OUT = 150;
 /** new meshes handed to the GPU per frame (spreads the buffer uploads) */
 const UPLOADS_PER_FRAME = 3;
 
+/** the spyglass view, for level-of-detail */
+export interface Lens {
+  /** view direction (world) */
+  dir: THREE.Vector3;
+  /** half of the (horizontal) field of view, rad */
+  halfAngle: number;
+  zoom: number;
+}
+
 interface Tile {
   tx: number;
   tz: number;
@@ -115,9 +124,12 @@ export class Terrain {
     }
   }
 
-  /** once per frame: decide which tiles are needed at which detail, dispatch work, adopt finished tiles */
-  update(focus: THREE.Vector3, uploads = UPLOADS_PER_FRAME): void {
-    this.plan(focus);
+  /**
+   * Once per frame: decide which tiles are needed at which detail, dispatch work, adopt finished tiles.
+   * `lens` (the spyglass): tiles inside its narrow view get the detail of a distance ÷ magnification.
+   */
+  update(focus: THREE.Vector3, uploads = UPLOADS_PER_FRAME, lens?: Lens): void {
+    this.plan(focus, lens);
     this.dispatch();
     for (let k = 0; k < uploads && this.results.length; k++) this.adopt(this.results.shift()!);
   }
@@ -133,7 +145,9 @@ export class Terrain {
     return v;
   }
 
-  private plan(focus: THREE.Vector3): void {
+  private plan(focus: THREE.Vector3, lens?: Lens): void {
+    const zoom = lens && lens.zoom > 1.01 ? lens.zoom : 1;
+    const lx = lens ? lens.dir.x : 0, lz = lens ? lens.dir.z : 0, ll = Math.hypot(lx, lz) || 1;
     const far = LODS[LODS.length - 1].dist;
     const r = Math.ceil((far + HYSTERESIS) / TILE);
     const ctx = Math.floor(focus.x / TILE), ctz = Math.floor(focus.z / TILE);
@@ -145,7 +159,14 @@ export class Terrain {
         // distance from the focus to the nearest point of the tile
         const dx = Math.max(tx * TILE - focus.x, 0, focus.x - (tx + 1) * TILE);
         const dz = Math.max(tz * TILE - focus.z, 0, focus.z - (tz + 1) * TILE);
-        const d = Math.hypot(dx, dz);
+        let d = Math.hypot(dx, dz);
+        let inLens = false;
+        if (zoom > 1 && d > 1) {
+          // inside the lens's cone (plus the tile's own angular size)? then it is seen as if this close
+          const cx = (tx + 0.5) * TILE - focus.x, cz = (tz + 0.5) * TILE - focus.z, cl = Math.hypot(cx, cz);
+          const ang = Math.acos(Math.max(-1, Math.min(1, (cx * lx + cz * lz) / (cl * ll))));
+          if (ang < lens!.halfAngle + Math.atan((TILE * 0.75) / cl)) { d /= zoom; inLens = true; }
+        }
         const key = `${tx},${tz}`;
         let tile = this.tiles.get(key);
         let want = LODS.findIndex((l) => d < l.dist);
@@ -154,11 +175,13 @@ export class Terrain {
           if (tile && d < far + HYSTERESIS) seen.add(key);
           continue;
         }
-        // coarsen only past the hysteresis band
-        if (tile && tile.lod >= 0 && want > tile.lod && d < LODS[tile.lod].dist + HYSTERESIS) want = tile.lod;
+        // coarsen only past the hysteresis band — and not at all while the spyglass is up, so sweeping it
+        // across the horizon only ever refines tiles instead of rebuilding them back and forth
+        if (tile && tile.lod >= 0 && want > tile.lod && (zoom > 1 || d < LODS[tile.lod].dist + HYSTERESIS)) want = tile.lod;
         if (!tile) { tile = { tx, tz, lod: -1, mesh: null, pending: -1, emptyAt: 99, plants: null, plantsAsked: false, near: false }; this.tiles.set(key, tile); }
         seen.add(key);
-        const near = d < (tile.near ? VEG_FULL_OUT : VEG_FULL_IN);
+        // (through the lens the full plant models only come in closer: they are most of the cost)
+        const near = d < (tile.near ? VEG_FULL_OUT : VEG_FULL_IN) * (inLens ? 0.55 : 1);
         if (near !== tile.near) { tile.near = near; this.plantDetail(tile); }
         if (want === tile.lod || want === tile.pending || want >= tile.emptyAt) continue;
         this.queue.push({ tile, lod: want, d });

@@ -106,6 +106,16 @@ export class Discovery {
     if (this.dirty && this.saveT > 5) this.save();
   }
 
+  /** mark a round area as seen from afar (an island made out through the spyglass) */
+  revealAt(x: number, z: number, radius: number): void {
+    const r = Math.ceil(radius / CELL), ci = Math.floor(x / CELL), cj = Math.floor(z / CELL);
+    let any = false;
+    for (let j = cj - r; j <= cj + r; j++)
+      for (let i = ci - r; i <= ci + r; i++)
+        if (Math.hypot((i + 0.5) * CELL - x, (j + 0.5) * CELL - z) < radius && this.mark(i, j)) any = true;
+    if (any) { this.version++; this.dirty = true; }
+  }
+
   /** forget everything for this world (debug) */
   clear(): void {
     this.chunks.clear();

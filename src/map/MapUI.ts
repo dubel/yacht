@@ -29,7 +29,7 @@ export class MapUI {
     this.miniWrap.id = 'minimap';
     this.miniWrap.title = 'Mapa (Tab)';
     this.miniWrap.append(this.mini);
-    this.miniWrap.addEventListener('click', () => this.toggle());
+    this.miniWrap.addEventListener('click', () => { this.toggle(); if (document.pointerLockElement) document.exitPointerLock(); });
     this.overlay.id = 'chart';
     this.overlay.hidden = true;
     const hint = document.createElement('div');
@@ -40,7 +40,10 @@ export class MapUI {
 
     // pan / zoom on the big chart
     let drag: { x: number; y: number } | null = null;
-    this.big.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; this.big.setPointerCapture(e.pointerId); });
+    this.big.addEventListener('pointerdown', (e) => {
+      drag = { x: e.clientX, y: e.clientY };
+      try { this.big.setPointerCapture(e.pointerId); } catch { /* pointer still locked by the deck view */ }
+    });
     this.big.addEventListener('pointermove', (e) => {
       if (!drag) return;
       const dpr = this.dpr;

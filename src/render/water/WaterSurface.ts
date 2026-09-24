@@ -22,7 +22,7 @@ ${GERSTNER_GLSL}
 varying vec3 vWorld;
 varying vec2 vParam;
 varying float vCrest;
-uniform float uChop;
+uniform float uChop, uLodScale;
 const mat2 M = mat2(0.8, -0.6, 0.6, 0.8);
 const float SC = 0.41, WB = 0.10;
 void main(){
@@ -33,7 +33,8 @@ void main(){
   for (int i=0;i<${MAX_WAVES};i++) ampSum += uWaveB[i].x;
   vCrest = g.y / max(ampSum, 1e-3);
   vec3 w = vec3(p.x + g.x, g.y, p.y + g.z);
-  float camD = length(w.xz - cameraPosition.xz);
+  // (detail distance: divided by the spyglass magnification, which brings far water up close)
+  float camD = length(w.xz - cameraPosition.xz)*uLodScale;
   float detail = exp(-camD*0.01);
   w.y += uChop*detail*(textureLod(uSurf, w.xz/uL, 0.0).x + WB*SC*textureLod(uSurf, (M*w.xz)/(uL*SC) + 0.37, 0.0).x);
   vec2 ruv = (w.xz - uRipCenter)/uRipSize + 0.5;
@@ -53,7 +54,7 @@ uniform vec3 uSunDir, uSunRadIn, uSkyIrr, uFogColor;
 uniform float uFogDensity, uTime, uL, uRipSize;
 uniform vec2 uRipCenter;
 uniform int uView;
-uniform float uChop, uWhitecaps, uRain;
+uniform float uChop, uWhitecaps, uRain, uLodScale;
 ${GERSTNER_GLSL}
 ${WATER_OPTICS_GLSL}
 ${CLOUD_SHADOW_GLSL}
@@ -111,6 +112,8 @@ void main(){
   vec3 toCam = cameraPosition - P;
   float dist = length(toCam);
   vec3 v = toCam/dist, wd = -v;
+  // how far this water *looks* (for detail and anti-aliasing): a spyglass magnifies, fog doesn't care
+  float ldist = dist*uLodScale;
   vec2 suv = gl_FragCoord.xy/uResolution;
 
   // ---- manual occlusion by the opaque scene (it lives in another render target) ----
@@ -128,8 +131,8 @@ void main(){
   float ripIn = 0.0;
   if (all(greaterThan(ruv, vec2(0.0))) && all(lessThan(ruv, vec2(1.0)))) { R = texture(uRip, ruv); ripIn = 1.0; }
   vec2 slope = gerstnerSlope(vParam) + uChop*(A.yz + WB*(transpose(M)*B.yz)) + R.yz;
-  slope += uChop*0.13*exp(-dist*0.04)*(transpose(M2)*Cm.yz);
-  if (uRain > 0.01) slope += uRain*rainRipples(P.xz, uTime)*exp(-dist*0.05);
+  slope += uChop*0.13*exp(-ldist*0.04)*(transpose(M2)*Cm.yz);
+  if (uRain > 0.01) slope += uRain*rainRipples(P.xz, uTime)*exp(-ldist*0.05);
   float var = uChop*uChop*(max(A.w - dot(A.yz,A.yz), 0.0) + WB*WB*max(B.w - dot(B.yz,B.yz), 0.0));
   vec3 n = normalize(vec3(-slope.x, 1.0, -slope.y));
 
@@ -175,11 +178,11 @@ void main(){
   // ---- reflection: planar render of the world, distorted by the surface normal ----
   vec4 rc = uReflMatrix*vec4(P.x, 0.0, P.z, 1.0);
   vec2 rUV0 = rc.xy/rc.w;
-  vec2 rUV = rUV0 + n.xz*0.16/(1.0 + dist*0.012);
+  vec2 rUV = rUV0 + n.xz*0.16/(1.0 + ldist*0.012);
   vec3 refl = texture(uRefl, clamp(rUV, 0.001, 0.999)).rgb;
 
   // sun glints: Beckmann with slope-variance widening (LEAN-style), Clearwater
-  float a2 = 0.00012 + 1.2*var + 0.00002*dist;
+  float a2 = 0.00012 + 1.2*var + 0.00002*ldist;
   vec3 h = normalize(v + uSunDir);
   float nh = max(dot(n,h),0.0), nl = max(dot(n,uSunDir),0.0);
   float c2 = max(nh*nh, 1e-4); float tan2 = (1.0-c2)/c2;
@@ -332,6 +335,8 @@ export class WaterSurface {
       uChop: { value: 1 },
       uWhitecaps: { value: 0 },
       uRain: { value: 0 },
+      /** 1 / spyglass magnification: scales the distances that fade detail (not the fog) */
+      uLodScale: { value: 1 },
     };
     this.material = new THREE.ShaderMaterial({
       vertexShader: VERT,

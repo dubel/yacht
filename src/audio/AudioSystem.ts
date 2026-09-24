@@ -5,6 +5,8 @@
  * Browsers only allow audio after a user gesture, so the context starts on the first click / key press.
  */
 
+import { playFootstep } from './footsteps';
+
 export interface AudioState {
   windSpeed: number;
   rain: number;
@@ -50,6 +52,8 @@ export class AudioSystem {
   private flog!: { gain: GainNode; lfo: OscillatorNode };
   private gullT = 6;
   private creakT = 4;
+  private foot = 1;
+  private motion = 0;
 
   constructor(private readonly base = 'assets/audio/') {
     const start = () => {
@@ -179,6 +183,47 @@ export class AudioSystem {
     src.start(ctx.currentTime + (opts.delay ?? 0));
   }
 
+  /** a footfall on deck (first-person view): pace 0 walk … 1 run, weight > 1 for a landing */
+  footstep(pace: number, weight = 1): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.foot = -this.foot; // left, right, left…
+    playFootstep(ctx, this.muffle, this.noise, ctx.currentTime + 0.005, { pace, weight, pan: this.foot * 0.12, motion: Math.min(1, this.motion * 8) });
+  }
+
+  /** the brass tube slides out (open) or in, and seats with a click */
+  spyglass(open: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.01, dur = 0.22;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.start(t, Math.random() * 2, dur + 0.1);
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.Q.value = 6;
+    band.frequency.setValueAtTime(open ? 1800 : 4200, t);
+    band.frequency.exponentialRampToValueAtTime(open ? 4200 : 1800, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.05, t + 0.03);
+    g.gain.linearRampToValueAtTime(0.03, t + dur);
+    g.gain.linearRampToValueAtTime(0, t + dur + 0.02);
+    src.connect(band).connect(g).connect(this.muffle);
+    // the click of the draw tube seating
+    const click = ctx.createBufferSource();
+    click.buffer = this.noise;
+    click.start(t + dur, Math.random() * 2, 0.03);
+    const cb = ctx.createBiquadFilter();
+    cb.type = 'bandpass';
+    cb.frequency.value = 3200;
+    cb.Q.value = 3;
+    const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.22, t + dur);
+    cg.gain.setTargetAtTime(0, t + dur + 0.002, 0.006);
+    click.connect(cb).connect(cg).connect(this.muffle);
+  }
+
   /** a lightning strike: the thunder arrives at the speed of sound, duller from far away */
   thunder(e: ThunderEvent): void {
     if (!this.ctx) return;
@@ -191,6 +236,7 @@ export class AudioSystem {
   update(dt: number, s: AudioState): void {
     const ctx = this.ctx;
     if (!ctx) return;
+    this.motion = s.motion;
     const t = ctx.currentTime;
     const set = (p: AudioParam, v: number, tc = 0.3) => p.setTargetAtTime(v, t, tc);
     const loop = (n: LoopName, v: number) => { const l = this.loops.get(n); if (l) set(l.gain.gain, v, 0.6); };

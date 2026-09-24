@@ -6,8 +6,17 @@ export class Input {
   dragDY = 0;
   wheel = 0;
   dragging = false;
+  /** mouse-look while the pointer is locked (first-person view), px */
+  lookDX = 0;
+  lookDY = 0;
+  /** right mouse button held (the spyglass) */
+  rmb = false;
+  /** lock the pointer on the next click on the canvas (set by the first-person view) */
+  wantLock = false;
+  private readonly el: HTMLElement;
 
   constructor(el: HTMLElement) {
+    this.el = el;
     addEventListener('keydown', (e) => {
       if (e.repeat) return;
       if (e.code.startsWith('F') && e.code.length <= 3) e.preventDefault();
@@ -20,11 +29,19 @@ export class Input {
 
     let last: { x: number; y: number } | null = null;
     el.addEventListener('pointerdown', (e) => {
+      // pointer locked (first-person look): clicks carry no drag, and capturing would throw InvalidStateError
+      if (this.locked || e.button === 2) return;
+      if (this.wantLock) {
+        // the lock can be refused (e.g. clicked again right after Esc released it): just stay unlocked
+        try { Promise.resolve(el.requestPointerLock()).catch(() => {}); } catch { /* unsupported */ }
+        return;
+      }
       el.setPointerCapture(e.pointerId);
       last = { x: e.clientX, y: e.clientY };
       this.dragging = true;
     });
     el.addEventListener('pointermove', (e) => {
+      if (this.locked) { this.lookDX += e.movementX; this.lookDY += e.movementY; return; }
       if (!last) return;
       this.dragDX += e.clientX - last.x;
       this.dragDY += e.clientY - last.y;
@@ -33,8 +50,16 @@ export class Input {
     const end = () => { last = null; this.dragging = false; };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
+    // right button: tracked on its own (it also arrives while the pointer is locked); no context menu
+    el.addEventListener('mousedown', (e) => { if (e.button === 2) this.rmb = true; });
+    addEventListener('mouseup', (e) => { if (e.button === 2) this.rmb = false; });
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
+    addEventListener('blur', () => { this.rmb = false; });
     el.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
   }
+
+  get locked(): boolean { return document.pointerLockElement === this.el; }
+  unlock(): void { if (this.locked) document.exitPointerLock(); }
 
   isDown(code: string): boolean { return this.down.has(code); }
   axis(neg: string, pos: string): number { return (this.isDown(pos) ? 1 : 0) - (this.isDown(neg) ? 1 : 0); }
@@ -43,6 +68,6 @@ export class Input {
 
   endFrame(): void {
     this.pressed.clear();
-    this.dragDX = this.dragDY = this.wheel = 0;
+    this.dragDX = this.dragDY = this.wheel = this.lookDX = this.lookDY = 0;
   }
 }

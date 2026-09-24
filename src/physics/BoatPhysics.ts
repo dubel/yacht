@@ -230,19 +230,23 @@ export class BoatPhysics {
     this.telemetryUpdate();
   }
 
+  /** false while the sailor walks the deck (WASD moves them; the arrows and Q/E still work the boat) */
+  wasd = true;
+
   private controls(dt: number, input: Input): void {
-    const steer = input.axis('KeyA', 'KeyD') + input.axis('ArrowLeft', 'ArrowRight');
+    const steer = (this.wasd ? input.axis('KeyA', 'KeyD') : 0) + input.axis('ArrowLeft', 'ArrowRight');
     const target = clamp(steer, -1, 1) * 35 * DEG;
     const rate = (steer !== 0 ? 55 : 40) * DEG * dt;
     this.rudder += clamp(target - this.rudder, -rate, rate);
 
-    const trim = input.axis('KeyS', 'KeyW') + input.axis('ArrowDown', 'ArrowUp') + input.axis('KeyE', 'KeyQ');
+    const trim = (this.wasd ? input.axis('KeyS', 'KeyW') : 0) + input.axis('ArrowDown', 'ArrowUp') + input.axis('KeyE', 'KeyQ');
     if (trim !== 0) {
       this.autoTrim = false;
       this.sheet = clamp(this.sheet - trim * 28 * DEG * dt, MIN_SHEET, 88 * DEG);
     }
     if (input.wasPressed('KeyT')) this.autoTrim = !this.autoTrim;
-    if (input.wasPressed('Space')) this.sailsTarget = this.sailsTarget > 0.5 ? 0 : 1;
+    // Space furls / sets the sails from the chase camera (on deck it jumps); X does it anywhere
+    if ((this.wasd && input.wasPressed('Space')) || input.wasPressed('KeyX')) this.sailsTarget = this.sailsTarget > 0.5 ? 0 : 1;
     this.sailsUp += clamp(this.sailsTarget - this.sailsUp, -dt / 2.5, dt / 2.5);
 
     if (this.autoTrim) {

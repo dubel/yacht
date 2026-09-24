@@ -21,6 +21,11 @@ import { Terrain } from '../world/Terrain';
 import { ChannelMarkers } from '../world/ChannelMarkers';
 import { Discovery } from '../map/Discovery';
 import { MapUI } from '../map/MapUI';
+import { DeckMap } from '../boat/DeckMap';
+import { DeckWalker } from '../camera/DeckWalker';
+import { LENS_R, Spyglass } from '../camera/Spyglass';
+import { featuresNear, terrainHeight } from '../world/WorldGen';
+import { placeName } from '../map/names';
 import { Vegetation } from '../world/Vegetation';
 import { Mission } from '../gameplay/Mission';
 import { Boat } from '../boat/Boat';
@@ -65,6 +70,13 @@ export class Game {
   readonly discovery = new Discovery(Config.worldSeed);
   map!: MapUI;
   physics!: BoatPhysics;
+  deck!: DeckMap;
+  walker!: DeckWalker;
+  /** first-person view from the deck (F) */
+  onDeck = false;
+  readonly spyglass = new Spyglass();
+  private scopeT = 0;
+  private scopeLabel = '';
   readonly cam: SailingCamera;
   readonly debug: DebugUI;
   readonly hud: Hud;
@@ -157,6 +169,12 @@ export class Game {
 
     await this.boat.load('assets/boats/amadis.glb', (f) => progress(0.3 + 0.65 * f));
     this.scene.add(this.boat.root);
+    this.deck = new DeckMap(this.renderer, this.boat);
+    this.walker = new DeckWalker(this.deck);
+    this.walker.onStep = (pace) => this.audio.footstep(pace);
+    this.walker.onLand = (h) => this.audio.footstep(0.5, 1 + Math.min(1.2, h * 1.6));
+    this.walker.onJump = () => this.audio.footstep(0.8, 0.8);
+    this.spyglass.onOpen = (open) => this.audio.spyglass(open);
     this.physics = new BoatPhysics(this.boat.info, this.waves, this.wind, (x, z) => this.terrain.heightAt(x, z));
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
@@ -199,7 +217,10 @@ export class Game {
     for (const [k, v] of fkeys) if (inp.wasPressed(k)) this.view = v;
     if (inp.wasPressed('KeyR')) this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, 0);
     if (inp.wasPressed('KeyH')) this.hud.toggleHelp();
-    if (inp.wasPressed('KeyV')) this.cam.toggleDive();
+    if (inp.wasPressed('KeyV') && !this.onDeck) this.cam.toggleDive();
+    if (inp.wasPressed('KeyF')) this.setOnDeck(!this.onDeck);
+    // L: the spyglass (from the chase camera it first takes you on deck)
+    if (inp.wasPressed('KeyL')) { if (!this.onDeck) this.setOnDeck(true); this.spyglass.toggle(); }
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
     if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
@@ -207,7 +228,8 @@ export class Game {
     const k = TRAVEL.indexOf(this.physics.travel);
     if (inp.wasPressed('Minus') || inp.wasPressed('NumpadSubtract')) this.physics.travel = TRAVEL[Math.max(0, k - 1)];
     if (inp.wasPressed('Equal') || inp.wasPressed('NumpadAdd')) this.physics.travel = TRAVEL[Math.min(TRAVEL.length - 1, k + 1)];
-    if (inp.wasPressed('Tab')) this.map.toggle();
+    // the chart needs a visible cursor: release the deck view's mouse lock (the next click takes it back)
+    if (inp.wasPressed('Tab')) { this.map.toggle(); if (this.map.open) this.input.unlock(); }
     if (inp.wasPressed('Escape')) this.map.close();
     if (inp.wasPressed('KeyC') && this.map.open) this.map.center();
     // an hour of clock jump moves the clouds by an hour of wind as well: a different sky, not the same one
@@ -269,10 +291,18 @@ export class Game {
       this.cam.camera.position.set(c[0], c[1], c[2]);
       this.cam.camera.lookAt(c[3] ?? 0, c[4] ?? 0, c[5] ?? 0);
     } else {
-      this.cam.update(dt, this.input, focus, body.heading, (x, z) => this.terrain.heightAt(x, z));
+      if (this.onDeck) {
+        const sg = this.spyglass;
+        sg.update(dt, this.input, !this.map.open);
+        this.walker.scope = sg.raise;
+        this.walker.magnification = sg.magnification;
+        this.walker.tremor = sg.tremor();
+        this.walker.update(dt, this.input, this.boat.root, this.cam.camera);
+      }
+      else this.cam.update(dt, this.input, focus, body.heading, (x, z) => this.terrain.heightAt(x, z));
     }
     this.cam.camera.updateMatrixWorld();
-    this.terrain.update(this.cam.camera.position);
+    this.updateLens(dt);
 
     // --- water simulation ---
     const u = this.water.uniforms;
@@ -348,6 +378,75 @@ export class Game {
     this.renderer.setRenderTarget(null);
     this.renderer.autoClear = true;
     this.renderer.render(this.scene, this.inspectCam);
+  }
+
+  /** switch between the chase camera and walking the deck */
+  setOnDeck(on: boolean): void {
+    this.onDeck = on;
+    const cam = this.cam.camera;
+    // the mast and rails come within a hand's reach of the eye: a closer near plane on deck
+    cam.near = on ? 0.08 : 0.3;
+    cam.updateProjectionMatrix();
+    this.physics.wasd = !on;
+    this.input.wantLock = on;
+    if (on) this.walker.spawn(this.boat.info.hullStern);
+    else { this.input.unlock(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+  }
+
+  /** is the top of the island at (x, z) visible from the eye, or does nearer land stand in the way? */
+  private inSight(eye: THREE.Vector3, x: number, z: number, radius: number): boolean {
+    const top = Math.max(1, terrainHeight(x, z));
+    const dx = x - eye.x, dz = z - eye.z, D = Math.hypot(dx, dz);
+    const n = Math.min(80, Math.ceil(D / 25));
+    for (let k = 1; k < n; k++) {
+      const t = k / n;
+      if (D * (1 - t) < radius) break; // reached the island itself
+      const line = eye.y + (top - eye.y) * t;
+      if (terrainHeight(eye.x + dx * t, eye.z + dz * t) > line + 0.3) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Spyglass optics for everything that depends on the view: narrow field of view, finer terrain and water
+   * detail inside the lens, the round field in the post pass, and naming (and charting) what is in it.
+   */
+  private updateLens(dt: number): void {
+    const cam = this.cam.camera, sg = this.spyglass, mag = this.onDeck ? sg.magnification : 1;
+    const fov = (2 * Math.atan(Math.tan((55 * Math.PI) / 360) / mag) * 180) / Math.PI;
+    if (Math.abs(cam.fov - fov) > 1e-4) { cam.fov = fov; cam.updateProjectionMatrix(); }
+    const dir = cam.getWorldDirection(new THREE.Vector3());
+    const halfAngle = Math.atan(Math.tan((fov * Math.PI) / 360) * cam.aspect);
+    this.terrain.update(cam.position, undefined, mag > 1.01 ? { dir, halfAngle, zoom: mag } : undefined);
+    this.water.uniforms.uLodScale.value = 1 / mag;
+    this.pipeline.post.scope = this.onDeck ? sg.raise : 0;
+    this.pipeline.post.scopeR = LENS_R;
+    if (!this.onDeck || sg.raise < 0.02) return;
+
+    // what is in the lens: the island nearest the centre of the field, if the haze lets it be seen
+    this.scopeT -= dt;
+    if (this.scopeT <= 0 && sg.raise > 0.8) {
+      this.scopeT = 0.2;
+      this.scopeLabel = '';
+      const p = cam.position, fl = Math.hypot(dir.x, dir.z) || 1;
+      let best = Infinity;
+      for (const f of featuresNear(p.x, p.z, 6000)) {
+        const dx = f.x - p.x, dz = f.z - p.z, D = Math.hypot(dx, dz);
+        if (D < f.radius) continue; // (inside it: the home lagoon)
+        const shore = D - f.radius;
+        if (Math.exp(-((this.env.fogDensity * shore) ** 2)) < 0.06) continue;
+        const ang = Math.acos(Math.max(-1, Math.min(1, (dx * dir.x + dz * dir.z) / (D * fl))));
+        const off = ang - Math.atan(f.radius / D);
+        if (off < halfAngle * 0.45 && off < best && this.inSight(p, f.x, f.z, f.radius)) {
+          best = off;
+          const km = shore < 1000 ? `${Math.round(shore / 10) * 10} m` : `${(shore / 1000).toFixed(1).replace('.', ',')} km`;
+          this.scopeLabel = `${placeName(f.kind, f.x, f.z)} · ${km}`;
+          this.discovery.revealAt(f.x, f.z, f.radius + 150);
+        }
+      }
+    }
+    // compass bearing of the view: north = −z, east = +x
+    sg.show((Math.atan2(dir.x, -dir.z) * 180) / Math.PI, this.scopeLabel);
   }
 
   private updateClouds(dt: number): void {

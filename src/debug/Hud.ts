@@ -17,8 +17,10 @@ export class Hud {
     this.help.innerHTML = [
       '<b>Sterowanie</b>',
       '<kbd>A</kbd>/<kbd>D</kbd> ster &nbsp; <kbd>W</kbd>/<kbd>S</kbd> wybierz / luzuj szot',
-      '<kbd>T</kbd> auto-trym &nbsp; <kbd>Spacja</kbd> zwiń / postaw żagle',
+      '<kbd>T</kbd> auto-trym &nbsp; <kbd>Spacja</kbd>/<kbd>X</kbd> zwiń / postaw żagle',
       'mysz: obrót kamery, kółko: zoom &nbsp; <kbd>V</kbd> pod wodę &nbsp; <kbd>R</kbd> reset',
+      '<kbd>F</kbd> na pokład (FPP): <kbd>WASD</kbd> chodzenie, <kbd>Shift</kbd> bieg, <kbd>Spacja</kbd> skok, mysz: rozglądanie, <kbd>←</kbd>/<kbd>→</kbd> ster',
+      '&nbsp;&nbsp;&nbsp;&nbsp;luneta: prawy przycisk myszy (przytrzymaj) lub <kbd>L</kbd>, kółko: przybliżenie &nbsp; <kbd>X</kbd> żagle',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
       '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>H</kbd> ukryj',

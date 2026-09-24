@@ -58,3 +58,17 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 #chart canvas:active { cursor: grabbing; }
 #chart .hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); font: italic 14px 'IM Fell English', Georgia, serif;
   color: rgba(240, 222, 180, 0.85); pointer-events: none; }
+
+/* ---- spyglass: brass rim over the lens field (the field itself is drawn by the post pass) ---- */
+#scope { position: fixed; inset: 0; z-index: 7; pointer-events: none; --raise: 0; }
+#scope svg { position: absolute; left: 50%; top: 50%; width: 100vmin; height: 100vmin;
+  transform: translate(-50%, -50%) scale(calc(1 + 2 * (1 - var(--raise)))); opacity: min(1, calc(var(--raise) * 3)); }
+#scope .ring line { stroke: #3b280e; }
+#scope .ring text { fill: #3b280e; font: 600 22px 'IM Fell English', Georgia, serif; text-anchor: middle; dominant-baseline: middle; }
+#scope .ring text.n { font-size: 15px; font-weight: 400; }
+#scope .bearing, #scope .label { position: absolute; left: 50%; transform: translateX(-50%); white-space: nowrap;
+  font: italic 17px 'IM Fell English', Georgia, serif; color: rgba(245, 228, 190, 0.92); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.9);
+  opacity: var(--raise); }
+#scope .bearing { top: calc(50% - 44vmin + 14px); font-size: 14px; letter-spacing: 0.08em; }
+#scope .label { top: calc(50% + 44vmin - 46px); font-size: 20px; transition: opacity 0.3s ease; }
+body.scoped #hud, body.scoped #mission, body.scoped #minimap, body.scoped #help, body.scoped #toast { opacity: 0; transition: opacity 0.25s ease; }

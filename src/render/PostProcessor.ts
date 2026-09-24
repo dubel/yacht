@@ -9,6 +9,10 @@ export class PostProcessor {
   exposure = 0.63;
   /** 0..1 golden-hour grade (warm highlights, violet shadows, more bloom) */
   golden = 0;
+  /** 0..1 spyglass at the eye: round lens field, edge fringing, black around */
+  scope = 0;
+  /** lens radius as a fraction of the shorter screen side (at full raise) */
+  scopeR = 0.44;
   private qA!: THREE.WebGLRenderTarget;
   private qB!: THREE.WebGLRenderTarget;
   private b1!: THREE.WebGLRenderTarget;
@@ -47,7 +51,7 @@ uniform sampler2D uSrc; uniform float uK;
 void main(){ o = vec4(texture(uSrc,vUv).rgb*uK, 1); }`, { uSrc: { value: null }, uK: { value: 1 } });
 
     this.final = passMaterial(/* glsl */ `
-uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden;
+uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden, uScope, uScopeR, uAspect;
 vec3 bicubic(sampler2D t, vec2 uv){
   vec2 ts = vec2(textureSize(t,0)); vec2 p = uv*ts - 0.5; vec2 f = fract(p); p = floor(p);
   vec2 w0 = f*(-0.5+f*(1.0-0.5*f)), w1 = 1.0+f*f*(-2.5+1.5*f), w2 = f*(0.5+f*(2.0-1.5*f)), w3 = f*f*(-0.5+0.5*f);
@@ -58,7 +62,17 @@ vec3 aces(vec3 x){ const float a=2.51,b=0.03,c=2.43,d=0.59,e=0.14; return clamp(
 float hash(vec2 p){ vec3 p3 = fract(vec3(p.xyx)*.1031); p3 += dot(p3, p3.yzx+33.33); return fract((p3.x+p3.y)*p3.z); }
 void main(){
   vec2 uv = vUv;
-  vec2 cc = uv-0.5; float ca = 0.0012*dot(cc,cc)*4.0;
+  // spyglass: position in the lens (1 = its rim); the field closes in from the screen edge as it is raised
+  float raise = uScope*uScope*(3.0 - 2.0*uScope);
+  float lensR = uScopeR*min(1.0, uAspect)*(1.0 + 2.0*(1.0 - raise));
+  vec2 sp = (uv - 0.5)*vec2(uAspect, 1.0);
+  float sr = length(sp)/lensR;
+  if (uScope > 0.0) {
+    // a touch of barrel distortion: the edge of the field is squeezed, the centre held
+    float k = 0.07*raise;
+    uv = 0.5 + (sp*(1.0 - k + k*sr*sr))/vec2(uAspect, 1.0);
+  }
+  vec2 cc = uv-0.5; float ca = 0.0012*dot(cc,cc)*4.0 + 0.0045*raise*sr*sr;
   vec3 c;
   c.r = texture(uHdr, uv + cc*ca).r; c.g = texture(uHdr, uv).g; c.b = texture(uHdr, uv - cc*ca).b;
   float bloom = 0.035 + 0.05*uGolden;
@@ -73,6 +87,9 @@ void main(){
   }
   float vig = 1.0 - 0.22*dot(cc*vec2(1.0,0.8), cc*vec2(1.0,0.8))*2.2;
   c *= vig;
+  // old glass: darker toward the rim of the field, and nothing outside it
+  c *= mix(1.0, 0.45 + 0.55*smoothstep(1.05, 0.45, sr), raise);
+  c *= 1.0 - smoothstep(0.985, 1.0, sr)*smoothstep(0.0, 0.15, uScope);
   c = aces(c);
   float lum = dot(c, vec3(0.2126,0.7152,0.0722));
   c = mix(vec3(lum), c, 0.93);
@@ -81,7 +98,8 @@ void main(){
   float g = hash(gl_FragCoord.xy + fract(uTime*7.13)*917.0) - 0.5;
   c += g * 0.014 * (1.0 - c*0.6);
   o = vec4(c, 1);
-}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 } });
+}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 },
+      uScope: { value: 0 }, uScopeR: { value: 0.44 }, uAspect: { value: 1 } });
   }
 
   setSize(w: number, h: number): void {
@@ -109,6 +127,8 @@ void main(){
     const f = this.final.uniforms;
     f.uHdr.value = hdr; f.uB1.value = this.b1.texture; f.uB2.value = this.b2.texture;
     f.uExp.value = this.exposure; f.uTime.value = time; f.uGolden.value = this.golden;
+    f.uScope.value = this.scope; f.uScopeR.value = this.scopeR;
+    f.uAspect.value = this.qA.width / Math.max(1, this.qA.height);
     blit.run(this.final, null);
   }
 
