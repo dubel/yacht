@@ -105,3 +105,15 @@ body.manning #help, body.manning #minimap, body.manning #mission { opacity: 0.2;
 #slots span.on { color: #ffe2a8; }
 #slots kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.16); }
 body.scoped #slots, body.manning #slots { opacity: 0; }
+
+/* ---- aground (kedging) and the leadsman's calls ---- */
+#kedge { position: fixed; left: 50%; bottom: 60px; transform: translateX(-50%); z-index: 6; pointer-events: none; white-space: nowrap;
+  font: 600 16px var(--sans); color: #ffe2a8; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9);
+  background: rgba(40, 20, 8, 0.45); padding: 8px 16px; border-radius: 10px; }
+#kedge kbd { font: 12px var(--mono); padding: 1px 6px; border-radius: 4px; background: rgba(255, 255, 255, 0.2); color: #fff; }
+#lead { position: fixed; left: 50%; top: 26%; transform: translateX(-50%); z-index: 6; pointer-events: none; white-space: nowrap;
+  font: italic 18px 'IM Fell English', Georgia, serif; color: #f3e2bd; text-shadow: 0 1px 6px rgba(0, 0, 0, 0.9); }
+#lead.danger { color: #ffb0a0; font-size: 21px; }
+#fade { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; z-index: 40; transition: opacity 0.4s ease; }
+#fade.on { opacity: 1; }
+#help .credit { font-size: 11px; opacity: 0.6; }

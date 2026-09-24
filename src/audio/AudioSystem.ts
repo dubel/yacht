@@ -316,6 +316,72 @@ export class AudioSystem {
     playImpact(ctx, this.muffle, this.noise, when, 'land', { pan: pan * 0.8, near: near * 0.5 });
   }
 
+  // ---- seamanship: kedging off a shoal, the leadsman's warnings ----
+  /** an oar stroke of the boat taking the kedge out */
+  oar(pan: number, distance: number): void {
+    const name = (['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)];
+    const near = Math.min(1, 15 / (distance + 5));
+    this.play(name, 0.35 * near, { pan: pan * 0.8, rate: 1.3 + Math.random() * 0.3, lowpass: 1500 + 6000 * near });
+  }
+
+  /** the kedge anchor let go */
+  anchorDrop(pan: number, distance: number): void {
+    const near = Math.min(1, 25 / (distance + 6));
+    this.play('splash-big', 0.8 * near, { pan: pan * 0.8, rate: 1.15, lowpass: 2000 + 9000 * near });
+  }
+
+  /** one click of the capstan's pawl, and now and then the groan of the cable */
+  capstan(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.003;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.start(t, Math.random() * 2, 0.06);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = 1300 + Math.random() * 300; bp.Q.value = 5;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.3, t); g.gain.setTargetAtTime(0, t + 0.002, 0.012);
+    src.connect(bp).connect(g).connect(this.muffle);
+    if (Math.random() < 0.3) this.play('creak-1', 0.35, { rate: 0.55 + Math.random() * 0.2, pan: (Math.random() - 0.5) * 0.6 });
+  }
+
+  /** the hull grinding over sand and coral: `level` 0 … 1, held until set again */
+  scrape(level: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    if (!this.scrapeGain) {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise; src.loop = true; src.start();
+      const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 380;
+      const am = ctx.createGain(); am.gain.value = 0.6;
+      const lfo = ctx.createOscillator(); lfo.frequency.value = 7; const lg = ctx.createGain(); lg.gain.value = 0.4;
+      lfo.connect(lg).connect(am.gain); lfo.start();
+      this.scrapeGain = ctx.createGain(); this.scrapeGain.gain.value = 0;
+      src.connect(lp).connect(am).connect(this.scrapeGain).connect(this.muffle);
+    }
+    this.scrapeGain.gain.setTargetAtTime(0.35 * level, ctx.currentTime, 0.2);
+  }
+  private scrapeGain: GainNode | null = null;
+
+  /** the ship's bell: `strikes` quick strokes (the leadsman calls shoal water) */
+  bell(strikes: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    for (let k = 0; k < strikes; k++) {
+      const t = ctx.currentTime + 0.01 + k * 0.32;
+      // a bronze bell: inharmonic partials, the higher ones dying first
+      for (const [ratio, amp, decay] of [[1, 0.1, 1.6], [2.76, 0.06, 0.9], [5.4, 0.035, 0.45], [8.93, 0.02, 0.25]] as const) {
+        const o = ctx.createOscillator();
+        o.frequency.value = 720 * ratio;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(amp, t + 0.003); g.gain.setTargetAtTime(0, t + 0.004, decay / 3);
+        o.connect(g).connect(this.muffle);
+        o.start(t); o.stop(t + decay * 2);
+      }
+    }
+  }
+
   /** a dolphin's blow: a short, breathy puff */
   blow(pan: number, distance: number): void {
     const ctx = this.ctx;

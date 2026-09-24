@@ -54,7 +54,7 @@ export class Weapons {
   private readonly rapier: Rapier;
   private readonly lantern: Lantern;
   /** the lantern's light in the world (in the main scene from the start, dark until the lantern is held) */
-  readonly worldLight = new THREE.PointLight(0xffa850, 0, 20, 2);
+  readonly worldLight = new THREE.PointLight(0xffa850, 0, 38, 2);
   private readonly handLight = new THREE.PointLight(0xffa850, 0, 1.5, 2);
   private readonly swing = new THREE.Vector2();
   private readonly swingV = new THREE.Vector2();
@@ -298,7 +298,8 @@ export class Weapons {
     const on = this.held === 'lantern' ? this.draw : 0;
     const t = this.time;
     const flicker = 0.86 + 0.08 * Math.sin(t * 11.3) + 0.05 * Math.sin(t * 23.7 + 1.3) + 0.03 * Math.sin(t * 41.1);
-    this.worldLight.intensity = 7 * on * flicker;
+    // (bright enough to light the deck round about and the rail across it; falls off as the square of distance)
+    this.worldLight.intensity = 42 * on * flicker;
     this.handLight.intensity = 0.35 * on * flicker;
     this.lantern.glass.emissiveIntensity = 0.3 * flicker;
     this.lantern.flame.scale.set(1, 0.85 + 0.3 * (flicker - 0.86) / 0.16, 1);

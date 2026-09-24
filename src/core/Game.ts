@@ -33,6 +33,10 @@ import { Guns } from '../combat/Guns';
 import { Artillery, RELOAD } from '../combat/Artillery';
 import { Musketry } from '../combat/Musketry';
 import { Weapons } from '../fpv/Weapons';
+import { Kedge } from '../gameplay/Kedge';
+import { Leadsman } from '../gameplay/Leadsman';
+import { Music, type Mood } from '../audio/Music';
+import { terrainHeight as landAt } from '../world/WorldGen';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
 import { placeName } from '../map/names';
 import { Vegetation } from '../world/Vegetation';
@@ -95,6 +99,11 @@ export class Game {
   readonly gunSight = new GunSight();
   readonly weapons = new Weapons();
   musketry!: Musketry;
+  kedge!: Kedge;
+  readonly leadsman = new Leadsman();
+  readonly music = new Music();
+  private landNear = true;
+  private landT = 0;
   /** gun the sailor on deck is standing at (−1: none) */
   private nearGun = -1;
   /** the Ctrl that manned the gun this frame must not also fire it */
@@ -236,6 +245,17 @@ export class Game {
     this.spyglass.onOpen = (open) => this.audio.spyglass(open);
     this.physics = new BoatPhysics(this.boat.info, this.waves, this.wind, (x, z) => this.terrain.heightAt(x, z));
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
+    // aground: kedging off (K); underway: the leadsman sounding ahead
+    this.kedge = new Kedge(this.physics, {
+      say: (text, s) => this.mission.say(text, s),
+      oar: (at) => { const h = this.heardFrom(at.x, at.z); this.audio.oar(h.pan, h.d); },
+      anchor: (at) => { const h = this.heardFrom(at.x, at.z); this.audio.anchorDrop(h.pan, h.d); this.splash.burst(at.x, 0.1, at.z, 25, 4); this.ripples.disturb(at.x, at.z, 0.8, 0.12); },
+      capstan: () => this.audio.capstan(),
+      scrape: (k) => this.audio.scrape(k),
+      done: (hours) => { this.clock.advance(hours); this.clouds.skip(hours * 3600, { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed }); },
+    }, () => this.discovery.track);
+    this.scene.add(this.kedge.group);
+    this.leadsman.onCall = (c) => this.audio.bell(c.level);
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
     this.scene.add(this.mission.group, this.markers.group, this.fish.mesh, this.gulls.mesh);
     this.gulls.onCall = (pan, d) => this.audio.gull(pan, d);
@@ -303,7 +323,7 @@ export class Game {
   private handleKeys(): void {
     const inp = this.input;
     if (inp.wasPressed('F1') || inp.wasPressed('Backquote')) this.debug.toggle();
-    const fkeys: [string, ViewMode][] = [['F2', 'final'], ['F3', 'normals'], ['F4', 'caustics'], ['F5', 'reflection'], ['F6', 'depth'], ['F7', 'ripples']];
+    const fkeys: [string, ViewMode][] = [['F2', 'final'], ['F3', 'normals'], ['F4', 'caustics'], ['F5', 'reflection'], ['F6', 'depth'], ];
     for (const [k, v] of fkeys) if (inp.wasPressed(k)) this.view = v;
     if (inp.wasPressed('KeyR')) this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, 0);
     // F8 (or H): the controls panel on / off
@@ -323,6 +343,7 @@ export class Game {
       }
     }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
+    if (inp.wasPressed('F7')) this.mission.say(this.music.toggle() ? 'Muzyka włączona (F7)' : 'Muzyka wyłączona (F7)', 2.5);
     // 1 pistol, 2 rapier, 3 lantern (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
     const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit3') ? 'lantern' : inp.wasPressed('Digit0') ? 'spyglass' : null;
     if (slot && !this.map.open) {
@@ -396,6 +417,11 @@ export class Game {
     }
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
+    this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
+    {
+      const o = body.origin, h = body.heading, bow = this.boat.info.hullBow;
+      this.leadsman.update(stepDt, o.x + Math.sin(h) * bow, o.z + Math.cos(h) * bow, h, body.speed * body.travel, this.kedge.state !== 'afloat' || body.grounded);
+    }
     if (this.fauna) {
       this.fish.update(stepDt, body.origin, body.origin, 1 - this.env.night);
       // gulls: a follower trails ~16 m astern; they keep away at night and in rain or heavy weather
@@ -507,6 +533,7 @@ export class Game {
       waves: wp.waves,
     });
 
+    this.music.update(dt, this.musicMood(dt), this.audio.started, this.audio.muted);
     this.hud.update(this);
     this.debug.update(dt);
     this.adaptQuality(dt);
@@ -560,6 +587,25 @@ export class Game {
     document.body.append(el);
     return el;
   })();
+
+  /** which music fits the moment: weather, time of day, where the ship is, what the crew is doing */
+  private musicMood(dt: number): Mood {
+    const k = this.kedge?.state;
+    if (k === 'rowing' || k === 'hauling') return 'haul';
+    const w = this.weather.p;
+    if (w.lightning > 1 || w.wind > 12.5 || w.rain > 0.55) return 'storm';
+    if (this.env.night > 0.35 || this.env.golden > 0.35) return 'dusk';
+    // far from any land (checked every couple of seconds): the open sea
+    this.landT -= dt;
+    if (this.landT <= 0 && this.physics) {
+      this.landT = 2;
+      const o = this.physics.origin;
+      this.landNear = false;
+      for (const r of [150, 350, 700]) for (let a = 0; a < 16 && !this.landNear; a++)
+        if (landAt(o.x + Math.cos(a * 0.3927) * r, o.z + Math.sin(a * 0.3927) * r) > 0.3) this.landNear = true;
+    }
+    return this.landNear ? 'calm' : 'voyage';
+  }
 
   /** where a sound comes from, relative to the camera: pan −1…1 and distance */
   private heardFrom(x: number, z: number): { pan: number; d: number } {

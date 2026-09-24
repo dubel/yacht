@@ -206,6 +206,20 @@ export class BoatPhysics {
     return this.v2.copy(this.com).negate().applyQuaternion(this.quaternion).add(this.position);
   }
 
+  /** kedging: world point the hull is hauled toward (null: none), and whether the line leads from the bow */
+  tow: THREE.Vector3 | null = null;
+  towFromBow = false;
+  private readonly towAt = new THREE.Vector3();
+  /** kedging: the heading the cable warps her round to (null: none) */
+  warpTo: number | null = null;
+  /** friction against the bottom (1 normal; kedging lets the hull slide) */
+  groundGrip = 1;
+
+  /** strike (or set) the sails, as the Space / X keys do */
+  setSails(up: boolean): void {
+    this.sailsTarget = up ? 1 : 0;
+  }
+
   /**
    * Fast travel (the − / + keys): the boat covers `travel` times the ground it sails. The dynamics — heel,
    * waves, sail forces — run at normal speed; each step just carries the hull further along its course.
@@ -305,7 +319,7 @@ export class BoatPhysics {
         const n = Math.min(pen, 1.5) * 4.0e6 - 2.0e5 * v.y;
         f.set(-v.x, 0, -v.z);
         const hv = f.length();
-        if (hv > 1e-4) f.multiplyScalar((Math.max(n, 0) * 0.5) / Math.max(hv, 0.3));
+        if (hv > 1e-4) f.multiplyScalar((Math.max(n, 0) * 0.5 * this.groundGrip) / Math.max(hv, 0.3));
         f.y = Math.max(n, 0);
         this.addForce(f, r);
       }
@@ -361,6 +375,29 @@ export class BoatPhysics {
     f.set(app.x, 0, app.z).multiplyScalar(0.5 * RHO_A * 1.0 * (38 + 30 * (1 - sailScale)) * aw).applyQuaternion(q);
     r.set(0, 4, 0).applyQuaternion(q);
     this.addForce(f, r);
+
+    // ---- kedging: the capstan hauls the hull toward a kedge anchor ----
+    if (this.tow) {
+      r.set(0, 0.6, this.towFromBow ? this.info.hullBow - 0.5 : this.info.hullStern + 0.5).applyQuaternion(q).sub(this.com.clone().applyQuaternion(q));
+      const at = this.towAt.copy(this.position).add(r);
+      f.set(this.tow.x - at.x, 0, this.tow.z - at.z);
+      const dist = f.length();
+      if (dist > 0.5) {
+        f.divideScalar(dist);
+        this.pointVel(r, v);
+        // a steady walk round the capstan: pull harder when slower than ~1.6 m/s, never push
+        const want = Math.min(1.6, dist * 0.4);
+        const pull = clamp((want - v.dot(f)) * this.mass * 1.2, 0, this.mass * 2.2);
+        this.addForce(f.multiplyScalar(pull), r);
+      }
+    }
+
+    // warping her round on the cable: a gentle yaw toward the wanted heading (world angVel, vertical axis)
+    if (this.warpTo !== null) {
+      let d = this.warpTo - this.heading;
+      d = Math.atan2(Math.sin(d), Math.cos(d));
+      this.T.y += this.inertia.y * (clamp(d, -0.8, 0.8) * 0.9 - this.angVel.y * 1.5);
+    }
 
     // ---- integrate ----
     this.velocity.addScaledVector(this.F, dt / this.mass);
