@@ -81,29 +81,13 @@ const SKY_PATCH_END = /* glsl */ `
 					vec2 cuv = cloudMapUV(direction), ct = 0.35/vec2(textureSize(uCloudMap, 0));
 					vec4 cl = 0.25*(texture(uCloudMap, cuv + vec2(ct.x, ct.y)) + texture(uCloudMap, cuv + vec2(-ct.x, ct.y))
 					              + texture(uCloudMap, cuv + vec2(ct.x, -ct.y)) + texture(uCloudMap, cuv - ct));
-					// far layer (low elevation → tens of km away, not marched): continue the deck seen a little higher
-					// down to the horizon, then soften it with aerial perspective toward the sky colour
-					float far = smoothstep(9000.0, 32000.0, uCloudBase/max(direction.y, 0.012));
-					// (averaged over a wide slice of azimuth and two heights: the statistics of the layer, not an
-					//  extrusion of individual clouds, which would streak)
-					float yRef = uCloudBase/18000.0;
-					float az = atan(direction.z, direction.x);
-					vec4 ref = vec4(0.0);
-					for (int k = 0; k < 8; k++) {
-						float a = az + (float(k) - 3.5)*0.06;
-						for (int j = 0; j < 2; j++) {
-							float yy = yRef*(1.0 + 0.6*float(j));
-							vec3 dr = normalize(vec3(cos(a), yy, sin(a)));
-							ref += texture(uCloudMap, cloudMapUV(dr));
-						}
-					}
-					ref /= 16.0;
-					vec4 c2 = mix(cl, ref, far);
-					// (the clear-sky colour only exists where there is clear sky: no haze toward it under a deck)
-					// (the clear-sky horizon is very bright in the Preetham model — clamp it, and fade the effect out
-					//  under cover, where that bright clear air simply isn't there)
-					float aerial = 0.35*far*pow(1.0 - uCloudCover, 3.0);
-					texColor = texColor*c2.a + mix(c2.rgb, min(texColor, vec3(1.6))*(1.0 - c2.a), aerial);
+					// aerial perspective by the distance to the cloud base along this ray (curved earth, stable form):
+					// clouds tens of km away fade into the horizon haze. (The clear-sky Preetham horizon is very
+					// bright — clamp it; under a deck that bright clear air isn't there, so haze less.)
+					float sy = max(direction.y, 0.0);
+					float tc = 2.0*uCloudBase/(sy + sqrt(sy*sy + 2.0*uCloudBase/6371000.0));
+					float aerial = (1.0 - exp(-tc/42000.0))*mix(0.8, 0.45, uCloudCover);
+					texColor = texColor*cl.a + mix(cl.rgb, min(texColor, vec3(1.6))*(1.0 - cl.a), aerial);
 				}
 				texColor += uFlash * vec3(0.5, 0.56, 0.72) * (0.35 + 0.65*smoothstep(-0.1, 0.35, direction.y));
 			}
@@ -216,8 +200,11 @@ export class Environment {
     const gk = this.golden;
     u.turbidity.value = 2.2 + 5.5 * gk;
     u.rayleigh.value = 1.1 + 2.2 * gk;
-    u.mieCoefficient.value = 0.004 + 0.003 * gk;
-    u.mieDirectionalG.value = 0.82 + 0.07 * gk;
+    // clean, cloudless air (the 'clear' preset) has little aerosol: a tight, weaker glow around the sun, so
+    // the disc stands out instead of drowning in a wide white aureole
+    const clean = 1 - THREE.MathUtils.smoothstep(w.cloudCoverage, 0.02, 0.17);
+    u.mieCoefficient.value = 0.004 - 0.0025 * clean + 0.003 * gk;
+    u.mieDirectionalG.value = 0.82 + 0.1 * clean * (1 - gk) + 0.07 * gk;
     u.cloudCoverage.value = 0; // Preetham's 2D clouds are replaced by the volumetric layer
     u.uCloudCover.value = THREE.MathUtils.smoothstep(w.cloudCoverage, 0.15, 0.9);
     u.uCloudBase.value = w.cloudBase;

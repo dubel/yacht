@@ -5,7 +5,7 @@
 //   ?cam=x,y,z,tx,ty,tz  free camera looking from x,y,z at tx,ty,tz
 //   ?q=0.8            initial render-resolution scale
 //   ?time=19:40       time of day at start;  ?daylen=7  minutes per day (0 = frozen)
-//   ?weather=storm    clear|cloudy|rain|storm|gale|fog (PL: pogodnie|pochmurno|deszcz|burza|sztorm|mgla|auto)
+//   ?weather=storm    clear|fair|cloudy|rain|storm|gale|fog (PL: bezchmurnie|pogodnie|pochmurno|deszcz|burza|sztorm|mgla|auto)
 //   ?moon=0.5         moon phase (0 new … 0.5 full);  ?pause  start with the clock stopped
 //   ?sun=35,200       pin the sun: elevation, azimuth (degrees) — overrides the day cycle
 //   ?speed=4          start the boat moving (m/s), for wake checks
@@ -34,7 +34,7 @@ export const Config = {
   startTime: parseTime(Q.get('time')) ?? 10.5,
   /** ?daylen=7 minutes per game day (0 = clock stopped) */
   dayLengthSec: (num('daylen') ?? 7) * 60,
-  /** ?weather=clear|cloudy|rain|storm|gale|fog (or pogodnie|pochmurno|deszcz|burza|sztorm|mgla); fixed unless =auto */
+  /** ?weather=clear|fair|cloudy|rain|storm|gale|fog (or bezchmurnie|pogodnie|pochmurno|deszcz|burza|sztorm|mgla); fixed unless =auto */
   weather: parseWeather(Q.get('weather')),
   /** ?moon=0.5 moon phase at start (0 new, 0.25 first quarter, 0.5 full, 0.75 last quarter) */
   moonPhase: num('moon'),

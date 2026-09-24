@@ -167,6 +167,17 @@ float heightProfile(float h){
 // detail-erosion strength; the map pass lowers it with distance so far clouds don't alias into speckle
 float gDetail = 1.0;
 
+// Large-scale domain warp of the shape noise. The noise tiles every 4.2 km, and a long ray running along a
+// lattice direction (the ±x/±z axes, the diagonals) would sample the same line of it over and over: all
+// cloud or all gap, i.e. radial streaks toward those points of the horizon. A slowly drifting offset of a
+// few km breaks that. It varies over ~60 km, so it is set once per march step (gWarp) and reused by the
+// short light march.
+vec2 gWarp = vec2(0.0);
+vec2 cloudWarp(vec3 p){
+  vec2 q = (p.xz + uWindOffset)/64000.0;
+  return (vec2(texture(uShape, vec3(q, 0.63)).g, texture(uShape, vec3(q.yx + 0.37, 0.17)).g) - 0.5)*5000.0;
+}
+
 float cloudDensity(vec3 p, float h, bool detail){
   if (h <= 0.0 || h >= 1.0) return 0.0;
   vec3 q = p + vec3(uWindOffset.x, 0.0, uWindOffset.y);
@@ -175,7 +186,7 @@ float cloudDensity(vec3 p, float h, bool detail){
   // scaled (not offset) by the coverage map: a clear sky stays clear with the odd cloud, a storm keeps gaps
   float cov = clamp(uCoverage*(0.45 + 1.1*covMap), 0.0, 1.0);
   // skew upward toward the wind so towers lean
-  q.xz += h*h*vec2(260.0, 90.0);
+  q.xz += h*h*vec2(260.0, 90.0) + gWarp;
   q.y += uTime*3.0;
   vec4 s = texture(uShape, q/4200.0);
   float wfbm = s.g*0.625 + s.b*0.25 + s.a*0.125;
@@ -240,13 +251,19 @@ uniform float uFrame;
 void main(){
   vec2 p = vUv*2.0 - 1.0;
   float r2 = dot(p, p);
-  if (r2 > 1.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  if (r2 > 1.1) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  // a guard ring just outside the disc repeats the horizon, so filtered lookups at the horizon don't
+  // blend in empty texels (a bright line along the horizon)
+  if (r2 > 1.0) { p *= inversesqrt(r2); r2 = 1.0; }
   vec3 rd = normalize(vec3(2.0*p.x, 1.0 - r2, 2.0*p.y));
   vec3 ro = vec3(uCam.x, max(uCam.y, 1.0), uCam.z);
   float t0 = shellT(ro.y, rd.y, uBase), t1 = shellT(ro.y, rd.y, uTop);
-  // beyond ~40 km the sky shader renders the layer as haze (see Environment); don't march it
-  if (t1 <= t0 || t0 > 40000.0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  // marched all the way to the horizon (~110 km away): far clouds flatten into streaks as they should;
+  // the sky shader fades them with aerial perspective
+  if (t1 <= t0) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
   t1 = min(t1, t0 + 24000.0);
+  // far rays: fewer, cheaper light samples (the light march is lost in the haze there anyway)
+  int NL = t0 > 30000.0 ? 3 : 5;
   float horizon = 1.0 - rd.y;
   int N = int(mix(36.0, 56.0, horizon*horizon));
   float dt = (t1 - t0)/float(N);
@@ -264,6 +281,7 @@ void main(){
     // one texel of the map covers ~t·0.004 m: fade the ~500 m detail noise out before it aliases
     gDetail = 1.0 - smoothstep(2500.0, 7000.0, t);
     float h = heightFrac(pos);
+    gWarp = cloudWarp(pos);
     float dens = cloudDensity(pos, h, true);
     if (dens > 0.001){
       if (tHit < 0.0) tHit = t;
@@ -272,6 +290,7 @@ void main(){
       float ls = 55.0;
       vec3 lp = pos;
       for (int k=0;k<5;k++){
+        if (k >= NL) break;
         lp += uLightDir*ls;
         od += cloudDensity(lp, heightFrac(lp), k < 2)*ls;
         ls *= 1.9;
@@ -309,6 +328,7 @@ void main(){
   float dt = (t1 - t0)/float(N);
   for (int i=0;i<N;i++){
     vec3 p = g + ld*(t0 + (float(i) + 0.5)*dt);
+    gWarp = cloudWarp(p);
     od += cloudDensity(p, heightFrac(p), false)*dt;
   }
   o = vec4(exp(-0.045*od*0.7), 0.0, 0.0, 1.0);

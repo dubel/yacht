@@ -36,7 +36,7 @@ export class Game {
   readonly input: Input;
   readonly wind = new Wind();
   readonly clock = new GameTime(Config.startTime, Config.dayLengthSec, Config.moonPhase, Config.paused);
-  readonly weather = new Weather(Config.weather && Config.weather !== 'auto' ? Config.weather : 'clear', !Config.weather || Config.weather === 'auto');
+  readonly weather = new Weather(Config.weather && Config.weather !== 'auto' ? Config.weather : 'fair', !Config.weather || Config.weather === 'auto');
   readonly waves: WaveField;
   readonly env: Environment;
   readonly blit: Blitter;

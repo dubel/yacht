@@ -36,17 +36,17 @@ Cel: opłyń 5 boi (dowolna kolejność) i wróć na start. Najlepszy czas zapis
 
 ## Pora dnia i pogoda (parametry URL)
 
-Doba trwa 7 minut. Pogoda zmienia się sama (pogodnie → pochmurno → deszcz → burza → sztorm…), chyba że ją ustawisz.
+Doba trwa 7 minut. Pogoda zmienia się sama (bezchmurnie → małe zachmurzenie → pochmurno → deszcz → burza → sztorm…), chyba że ją ustawisz.
 
 | Parametr | Znaczenie | Przykład |
 | --- | --- | --- |
 | `time` | godzina startu | `?time=18:30`, `?time=6` |
-| `weather` | pogoda: `clear`/`pogodnie`, `cloudy`/`pochmurno`, `rain`/`deszcz`, `storm`/`burza`, `gale`/`sztorm`, `fog`/`mgla`, `auto` | `?weather=burza` |
+| `weather` | pogoda: `clear`/`bezchmurnie`, `fair`/`pogodnie` (małe zachmurzenie), `cloudy`/`pochmurno`, `rain`/`deszcz`, `storm`/`burza`, `gale`/`sztorm`, `fog`/`mgla`, `auto` | `?weather=burza` |
 | `daylen` | długość doby w minutach (`0` = zatrzymany zegar) | `?daylen=2` |
 | `pause` | start z zatrzymanym zegarem | `?time=17:45&pause` |
 | `moon` | faza księżyca: 0 nów, 0.25 pierwsza kwadra, 0.5 pełnia, 0.75 ostatnia kwadra | `?moon=0.25` |
 
-Np. zachód słońca w sztormie: `?time=17:40&weather=sztorm`, noc przy pełni: `?time=21&weather=pogodnie`.
+Np. zachód słońca w sztormie: `?time=17:40&weather=sztorm`, noc przy pełni: `?time=21&weather=bezchmurnie`.
 
 Chmury są wolumetryczne (ray-marching przez warstwę na zakrzywionej Ziemi, szum Perlin-Worley jak w *Horizon Zero Dawn*):
 odbijają się w wodzie, rzucają przesuwające się cienie na lagunę, wyspy i łódź, o zachodzie świecą od spodu na czerwono,
