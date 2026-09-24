@@ -349,14 +349,31 @@ void main(){
     this.shadow.texture.wrapS = this.shadow.texture.wrapT = THREE.ClampToEdgeWrapping;
   }
 
+  /** carry the field with the wind and evolve the shapes by `sec` seconds of cloud time (may be negative) */
+  private drift(sec: number, wind: { x: number; z: number }): void {
+    const u = this.mapMat.uniforms;
+    // upper-level wind carries the clouds faster than the surface wind
+    this.windOffset.x -= wind.x * 2.2 * sec;
+    this.windOffset.y -= wind.z * 2.2 * sec;
+    u.uTime.value += sec;
+    // wrap on common periods of every noise lookup (shape 4.2 km, detail 520 m, coverage 42 km, warp 64 km;
+    // uTime: 1400 s and 250 s), so nothing jumps and float precision holds over long sessions
+    const W = 17_472_000;
+    this.windOffset.set(this.windOffset.x - Math.floor(this.windOffset.x / W) * W, this.windOffset.y - Math.floor(this.windOffset.y / W) * W);
+    u.uTime.value -= Math.floor(u.uTime.value / 7000) * 7000;
+  }
+
+  /** clock jump ([ / ] keys): move the clouds by that much time at once and refill the map without blending */
+  skip(sec: number, wind: { x: number; z: number }): void {
+    this.drift(sec, wind);
+    this.frame = 0;
+  }
+
   update(dt: number, cam: THREE.Vector3, layer: CloudLayer, wind: { x: number; z: number }, light: {
     dir: THREE.Vector3; color: THREE.Vector3; ambient: THREE.Vector3; flash: number; flashDir: THREE.Vector3;
   }): void {
     const u = this.mapMat.uniforms;
-    // upper-level wind carries the clouds faster than the surface wind
-    this.windOffset.x -= wind.x * 2.2 * dt;
-    this.windOffset.y -= wind.z * 2.2 * dt;
-    u.uTime.value += dt;
+    this.drift(dt, wind);
     u.uCam.value.copy(cam);
     u.uCoverage.value = layer.coverage;
     u.uDensity.value = layer.density;

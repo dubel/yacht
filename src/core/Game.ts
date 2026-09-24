@@ -27,6 +27,9 @@ import { DebugUI } from '../debug/DebugUI';
 import { Hud } from '../debug/Hud';
 import { AudioSystem } from '../audio/AudioSystem';
 
+/** how much faster than real time the clouds move while the day clock runs (a 7-min day is ~200× faster) */
+const CLOUD_TIMELAPSE = 6;
+
 const START_BEARING = THREE.MathUtils.degToRad(190);
 const VIEW_IDS: Record<ViewMode, number> = { final: 0, normals: 1, caustics: 2, reflection: 3, depth: 4, ripples: 5, fft: 6 };
 
@@ -190,8 +193,10 @@ export class Game {
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
     if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
-    if (inp.wasPressed('BracketRight')) this.clock.advance(1);
-    if (inp.wasPressed('BracketLeft')) this.clock.advance(-1);
+    // an hour of clock jump moves the clouds by an hour of wind as well: a different sky, not the same one
+    const cloudWind = () => ({ x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed });
+    if (inp.wasPressed('BracketRight')) { this.clock.advance(1); this.clouds.skip(3600, cloudWind()); }
+    if (inp.wasPressed('BracketLeft')) { this.clock.advance(-1); this.clouds.skip(-3600, cloudWind()); }
   }
 
   frame(now: number): void {
@@ -220,7 +225,9 @@ export class Game {
     this.wind.gustiness = wp.gustiness;
     this.wind.update(t);
     if (Math.abs(this.waves.intensity - wp.waves) > 0.005) { this.waves.intensity = wp.waves; this.waves.pack(); }
-    this.updateClouds(Config.fixedTime !== null ? 1 / 60 : dt);
+    // timelapse: while the (compressed) day runs, clouds drift and evolve faster than real time
+    const cloudRate = this.clock.paused || this.clock.dayLength <= 0 ? 1 : CLOUD_TIMELAPSE;
+    this.updateClouds((Config.fixedTime !== null ? 1 / 60 : dt) * cloudRate);
     this.env.update(Config.fixedTime !== null ? 1 / 60 : dt, this.clock, this.weather);
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(this.env.fogColor);
