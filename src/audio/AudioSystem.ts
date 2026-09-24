@@ -33,7 +33,8 @@ export interface ThunderEvent {
 }
 
 const LOOPS = ['ocean', 'lapping', 'rain-light', 'rain-heavy', 'crickets', 'creak-loop'] as const;
-const SHOTS = ['thunder-1', 'thunder-2', 'thunder-3', 'thunder-4', 'thunder-5', 'gull-1', 'gull-2', 'gull-3', 'creak-1'] as const;
+const SHOTS = ['thunder-1', 'thunder-2', 'thunder-3', 'thunder-4', 'thunder-5', 'gull-1', 'gull-2', 'gull-3', 'creak-1',
+  'splash-big', 'splash-1', 'splash-2', 'splash-3'] as const;
 type LoopName = (typeof LOOPS)[number];
 type ShotName = (typeof SHOTS)[number];
 
@@ -241,13 +242,21 @@ export class AudioSystem {
     this.play(g, 0.15 + 0.55 * near, { pan: pan * 0.8, rate: 0.9 + Math.random() * 0.25, lowpass: 2500 + 12000 * near });
   }
 
-  /** water broken by a leaping dolphin; `size` 1 … 4 */
+  /**
+   * Water broken by a leaping dolphin; `size` 1 … 4. Recorded splashes: a body going in for the big ones,
+   * small splashes played slower (a bigger body of water) for the rest; the synthesised splash only while
+   * the recordings are still loading.
+   */
   splash(pan: number, distance: number, size: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
     const near = Math.min(1, 25 / (distance + 6));
     if (near < 0.05) return;
-    playSplash(ctx, this.muffle, this.noise, ctx.currentTime + 0.01, { size, pan: pan * 0.8, near });
+    const big = size >= 2.5;
+    const name = big ? 'splash-big' : (['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)];
+    if (!this.buffers.has(name)) { playSplash(ctx, this.muffle, this.noise, ctx.currentTime + 0.01, { size, pan: pan * 0.8, near }); return; }
+    const rate = big ? 0.9 + Math.random() * 0.2 : 0.7 + Math.random() * 0.15;
+    this.play(name, near * (big ? 0.9 : 0.35 + 0.2 * size), { pan: pan * 0.8, rate, lowpass: 2500 + 14000 * near });
   }
 
   /** one of our guns goes off (pan / distance from the listener) */
@@ -263,7 +272,13 @@ export class AudioSystem {
     if (!ctx) return;
     const near = Math.min(1, 40 / (distance + 15));
     if (near < 0.04) return;
-    playImpact(ctx, this.gunBus, this.noise, ctx.currentTime + Math.min(distance / 343, 6), kind, { pan: pan * 0.8, near });
+    const delay = Math.min(distance / 343, 6);
+    if (kind === 'water' && this.buffers.has('splash-big')) {
+      // a cannonball: the recorded plunge, slowed — heavier and deeper than a dolphin
+      this.play('splash-big', near, { pan: pan * 0.8, delay, rate: 0.7 + Math.random() * 0.1, lowpass: 1800 + 9000 * near });
+      return;
+    }
+    playImpact(ctx, this.gunBus, this.noise, ctx.currentTime + delay, kind, { pan: pan * 0.8, near });
   }
 
   /** a dolphin's blow: a short, breathy puff */

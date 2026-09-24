@@ -18,3 +18,5 @@ Wind, rigging whistle, sail flogging and hull water rush are synthesised in code
 | creak-loop.mp3 (pitched down) | [Assorted creaking noises of office chair.ogg](https://commons.wikimedia.org/wiki/File:Assorted_creaking_noises_of_office_chair.ogg) | stephan | Public domain |
 | creak-1.mp3 (pitched down) | [Creaky wooden casket.ogg](https://commons.wikimedia.org/wiki/File:Creaky_wooden_casket.ogg) | stephan | Public domain |
 | crickets.mp3 | [Field cricket unedited.ogg](https://commons.wikimedia.org/wiki/File:Field_cricket_unedited.ogg) | Thatcher | CC BY-SA 3.0 |
+| splash-big.mp3 (trimmed, gain) | [Jump into Water (Gravity Sound).mp3](https://commons.wikimedia.org/wiki/File:Jump_into_Water_(Gravity_Sound).mp3) | Gravity Sound | CC BY 4.0 |
+| splash-1..3.mp3 (excerpts) | [Bathtub water splashes.ogg](https://commons.wikimedia.org/wiki/File:Bathtub_water_splashes.ogg) | gradha | Public domain |
