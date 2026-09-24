@@ -36,12 +36,12 @@ Cel: opłyń 5 boi (dowolna kolejność) i wróć na start. Najlepszy czas zapis
 
 ## Pora dnia i pogoda (parametry URL)
 
-Doba trwa 7 minut. Pogoda zmienia się sama (bezchmurnie → małe zachmurzenie → pochmurno → deszcz → burza → sztorm…), chyba że ją ustawisz.
+Doba trwa 7 minut. Pogoda zmienia się sama (bezchmurnie → małe zachmurzenie → pochmurno → deszcz → burza → sztorm…, rzadko biały szkwał), chyba że ją ustawisz.
 
 | Parametr | Znaczenie | Przykład |
 | --- | --- | --- |
 | `time` | godzina startu | `?time=18:30`, `?time=6` |
-| `weather` | pogoda: `clear`/`bezchmurnie`, `fair`/`pogodnie` (małe zachmurzenie), `cloudy`/`pochmurno`, `rain`/`deszcz`, `storm`/`burza`, `gale`/`sztorm`, `fog`/`mgla`, `auto` | `?weather=burza` |
+| `weather` | pogoda: `clear`/`bezchmurnie`, `fair`/`pogodnie` (małe zachmurzenie), `cloudy`/`pochmurno`, `rain`/`deszcz`, `storm`/`burza`, `gale`/`sztorm`, `squall`/`szkwal` (biały szkwał), `fog`/`mgla`, `auto` | `?weather=burza` |
 | `daylen` | długość doby w minutach (`0` = zatrzymany zegar) | `?daylen=2` |
 | `pause` | start z zatrzymanym zegarem | `?time=17:45&pause` |
 | `moon` | faza księżyca: 0 nów, 0.25 pierwsza kwadra, 0.5 pełnia, 0.75 ostatnia kwadra | `?moon=0.25` |

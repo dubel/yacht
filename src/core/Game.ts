@@ -104,6 +104,8 @@ export class Game {
   readonly music = new Music();
   private landNear = true;
   private landT = 0;
+  private lastWeather = '';
+  private knockT = 0;
   /** gun the sailor on deck is standing at (−1: none) */
   private nearGun = -1;
   /** the Ctrl that manned the gun this frame must not also fire it */
@@ -418,6 +420,16 @@ export class Game {
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
     this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
+    // a squall coming on: the call to strike sail; laid over past ~78°: the crew lets everything fly
+    if (this.weather.kind !== this.lastWeather) {
+      if (this.weather.kind === 'squall') this.mission.say('Biały szkwał! Zrzucić żagle (X)!', 5);
+      this.lastWeather = this.weather.kind;
+    }
+    this.knockT = Math.abs(body.heel) > (78 * Math.PI) / 180 ? this.knockT + stepDt : 0;
+    if (this.knockT > 0.4 && body.sailsUp > 0.2) {
+      body.dropSails();
+      this.mission.say('Szkwał kładzie statek na burtę! Załoga puszcza szoty i zrzuca żagle!', 5);
+    }
     {
       const o = body.origin, h = body.heading, bow = this.boat.info.hullBow;
       this.leadsman.update(stepDt, o.x + Math.sin(h) * bow, o.z + Math.cos(h) * bow, h, body.speed * body.travel, this.kedge.state !== 'afloat' || body.grounded);

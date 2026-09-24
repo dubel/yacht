@@ -215,6 +215,12 @@ export class BoatPhysics {
   /** friction against the bottom (1 normal; kedging lets the hull slide) */
   groundGrip = 1;
 
+  /** knocked down: the crew lets fly everything at once — the sails come in almost instantly */
+  dropSails(): void {
+    this.sailsTarget = 0;
+    this.sailsUp = Math.min(this.sailsUp, 0.12);
+  }
+
   /** strike (or set) the sails, as the Space / X keys do */
   setSails(up: boolean): void {
     this.sailsTarget = up ? 1 : 0;

@@ -5,7 +5,7 @@
 //   ?cam=x,y,z,tx,ty,tz  free camera looking from x,y,z at tx,ty,tz
 //   ?q=0.8            initial render-resolution scale
 //   ?time=19:40       time of day at start;  ?daylen=7  minutes per day (0 = frozen)
-//   ?weather=storm    clear|fair|cloudy|rain|storm|gale|fog (PL: bezchmurnie|pogodnie|pochmurno|deszcz|burza|sztorm|mgla|auto)
+//   ?weather=storm    clear|fair|cloudy|rain|storm|gale|squall|fog (PL: bezchmurnie|pogodnie|pochmurno|deszcz|burza|sztorm|szkwal|mgla|auto)
 //   ?moon=0.5         moon phase (0 new … 0.5 full);  ?pause  start with the clock stopped
 //   ?sun=35,200       pin the sun: elevation, azimuth (degrees) — overrides the day cycle
 //   ?speed=4          start the boat moving (m/s), for wake checks
