@@ -19,6 +19,8 @@ import { WeatherFX } from '../environment/WeatherFX';
 import { BANDS, Clouds, cloudShadowUniforms } from '../environment/Clouds';
 import { Terrain } from '../world/Terrain';
 import { ChannelMarkers } from '../world/ChannelMarkers';
+import { Discovery } from '../map/Discovery';
+import { MapUI } from '../map/MapUI';
 import { Vegetation } from '../world/Vegetation';
 import { Mission } from '../gameplay/Mission';
 import { Boat } from '../boat/Boat';
@@ -58,6 +60,8 @@ export class Game {
   vegetation!: Vegetation;
   mission!: Mission;
   readonly markers = new ChannelMarkers();
+  readonly discovery = new Discovery(Config.worldSeed);
+  map!: MapUI;
   physics!: BoatPhysics;
   readonly cam: SailingCamera;
   readonly debug: DebugUI;
@@ -156,6 +160,7 @@ export class Game {
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
     this.scene.add(this.mission.group, this.markers.group);
+    this.map = new MapUI(this.discovery, Config.worldSeed);
     progress(1);
 
     this.resize();
@@ -197,6 +202,9 @@ export class Game {
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
     if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
+    if (inp.wasPressed('Tab')) this.map.toggle();
+    if (inp.wasPressed('Escape')) this.map.close();
+    if (inp.wasPressed('KeyC') && this.map.open) this.map.center();
     // an hour of clock jump moves the clouds by an hour of wind as well: a different sky, not the same one
     const cloudWind = () => ({ x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed });
     if (inp.wasPressed('BracketRight')) { this.clock.advance(1); this.clouds.skip(3600, cloudWind()); }
@@ -246,6 +254,8 @@ export class Game {
     this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t);
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
+    this.discovery.update(dt, body.origin.x, body.origin.z);
+    this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading });
 
     // --- camera ---
     const focus = body.origin.clone();

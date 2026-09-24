@@ -20,6 +20,7 @@ export class Hud {
       '<kbd>T</kbd> auto-trym &nbsp; <kbd>Spacja</kbd> zwiń / postaw żagle',
       'mysz: obrót kamery, kółko: zoom &nbsp; <kbd>V</kbd> pod wodę &nbsp; <kbd>R</kbd> reset',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
+      '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc)',
       '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>H</kbd> ukryj',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',
     ].join('<br>');

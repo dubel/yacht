@@ -11,7 +11,7 @@ export class Input {
     addEventListener('keydown', (e) => {
       if (e.repeat) return;
       if (e.code.startsWith('F') && e.code.length <= 3) e.preventDefault();
-      if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
+      if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
       this.down.add(e.code);
       this.pressed.add(e.code);
     });

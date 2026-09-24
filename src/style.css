@@ -43,3 +43,17 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 #toast { position: fixed; left: 50%; top: 18%; transform: translateX(-50%); font: 600 20px/1.3 var(--sans); color: #fff;
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.45); pointer-events: none; z-index: 6; opacity: 0; transition: opacity 0.6s ease; text-align: center; }
 #toast.on { opacity: 1; }
+
+/* ---- chart: minimap + full map (drawn on canvas as torn parchment) ---- */
+#minimap { position: fixed; left: 14px; top: 14px; width: 190px; height: 190px; z-index: 5; cursor: pointer;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45)); }
+#minimap canvas { width: 100%; height: 100%; display: block; }
+#minimap::after { content: 'N'; position: absolute; left: 50%; top: 4px; transform: translateX(-50%);
+  font: italic 15px 'IM Fell English', Georgia, serif; color: rgb(62, 38, 20); pointer-events: none; }
+#chart { position: fixed; inset: 0; z-index: 12; display: grid; place-items: center;
+  background: rgba(6, 18, 20, 0.55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+#chart canvas { width: min(94vw, 150vh); height: min(88vh, 62vw); cursor: grab;
+  filter: drop-shadow(0 12px 28px rgba(0, 0, 0, 0.6)); }
+#chart canvas:active { cursor: grabbing; }
+#chart .hint { position: fixed; bottom: 12px; left: 50%; transform: translateX(-50%); font: italic 14px 'IM Fell English', Georgia, serif;
+  color: rgba(240, 222, 180, 0.85); pointer-events: none; }
