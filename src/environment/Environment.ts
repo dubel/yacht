@@ -71,6 +71,15 @@ const SKY_PATCH_END = /* glsl */ `
 				vec3 deck = vec3(0.86, 0.9, 0.97) * through * (0.7 + 0.6*clamp(lum/(lum + 1.5), 0.0, 1.0))
 				          * mix(1.0, 0.85 + 0.3*smoothstep(-0.1, 0.5, direction.y), uOvercast)
 				          + vec3(0.002, 0.003, 0.006) * uNight;
+				// the sun as the eye sees it: a bright core just around the disc and a narrow aureole (~1–2°),
+				// which Preetham doesn't model — its Mie lobe is either a wide white glare or nothing. Hidden by
+				// clouds and the deck below; kept out of the IBL / fog probe with the disc.
+				{
+					float ang = length(direction - vSunDirection); // ≈ angle (rad) near the sun
+					// (colour and dimming from the extinction along the view path; fades as the sun sets)
+					vec3 sunC = Fex*smoothstep(-0.02, 0.03, vSunDirection.y);
+					texColor += sunC*(25.0*exp(-ang/0.008) + 1.5*exp(-ang/0.04))*showSunDisc;
+				}
 				// behind the volumetric clouds only a heavy deck greys the remaining gaps
 				texColor = mix(texColor, deck, smoothstep(0.55, 0.95, uOvercast));
 				// volumetric clouds (direction map): in front of sky, sun, moon and stars
@@ -202,9 +211,11 @@ export class Environment {
     u.rayleigh.value = 1.1 + 2.2 * gk;
     // clean, cloudless air (the 'clear' preset) has little aerosol: a tight, weaker glow around the sun, so
     // the disc stands out instead of drowning in a wide white aureole
+    // (a high g narrows the glow but makes its core far brighter: the whole area around the sun clips to white,
+    //  so keep g and lower the aerosol amount instead; the compact glow is drawn by SKY_PATCH_END)
     const clean = 1 - THREE.MathUtils.smoothstep(w.cloudCoverage, 0.02, 0.17);
-    u.mieCoefficient.value = 0.004 - 0.0025 * clean + 0.003 * gk;
-    u.mieDirectionalG.value = 0.82 + 0.1 * clean * (1 - gk) + 0.07 * gk;
+    u.mieCoefficient.value = 0.004 - 0.0032 * clean + 0.003 * gk;
+    u.mieDirectionalG.value = 0.82 - 0.02 * clean + 0.07 * gk;
     u.cloudCoverage.value = 0; // Preetham's 2D clouds are replaced by the volumetric layer
     u.uCloudCover.value = THREE.MathUtils.smoothstep(w.cloudCoverage, 0.15, 0.9);
     u.uCloudBase.value = w.cloudBase;
