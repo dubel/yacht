@@ -11,6 +11,9 @@ export class Input {
   lookDY = 0;
   /** right mouse button held (the spyglass) */
   rmb = false;
+  /** left button pressed this frame (fires a manned gun) */
+  click = false;
+  private ctrlAt = -1e9;
   /** lock the pointer on the next click on the canvas (set by the first-person view) */
   wantLock = false;
   private readonly el: HTMLElement;
@@ -18,6 +21,8 @@ export class Input {
   constructor(el: HTMLElement) {
     this.el = el;
     addEventListener('keydown', (e) => {
+      // Ctrl fires the guns: keep the browser's Ctrl shortcuts (save, bookmark, select all…) out of the way
+      if (e.ctrlKey || e.code === 'ControlLeft' || e.code === 'ControlRight') { e.preventDefault(); this.ctrlAt = performance.now(); }
       if (e.repeat) return;
       if (e.code.startsWith('F') && e.code.length <= 3) e.preventDefault();
       if (e.code === 'Space' || e.code === 'Tab' || e.code.startsWith('Arrow')) e.preventDefault();
@@ -51,7 +56,9 @@ export class Input {
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     // right button: tracked on its own (it also arrives while the pointer is locked); no context menu
-    el.addEventListener('mousedown', (e) => { if (e.button === 2) this.rmb = true; });
+    el.addEventListener('mousedown', (e) => { if (e.button === 2) this.rmb = true; if (e.button === 0) this.click = true; });
+    // Ctrl+W / Ctrl+T can't be blocked; right after a Ctrl, closing the page asks first
+    addEventListener('beforeunload', (e) => { if (performance.now() - this.ctrlAt < 2000) e.preventDefault(); });
     addEventListener('mouseup', (e) => { if (e.button === 2) this.rmb = false; });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('blur', () => { this.rmb = false; });
@@ -69,5 +76,6 @@ export class Input {
   endFrame(): void {
     this.pressed.clear();
     this.dragDX = this.dragDY = this.wheel = this.lookDX = this.lookDY = 0;
+    this.click = false;
   }
 }

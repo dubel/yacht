@@ -7,6 +7,7 @@
 
 import { playFootstep } from './footsteps';
 import { playSplash } from './water';
+import { playCannon, playImpact } from './guns';
 
 export interface AudioState {
   windSpeed: number;
@@ -42,6 +43,8 @@ export class AudioSystem {
   muted = false;
   private ctx: AudioContext | null = null;
   private master!: GainNode;
+  /** guns go through a compressor: a whole broadside must not clip */
+  private gunBus!: DynamicsCompressorNode;
   private muffle!: BiquadFilterNode;
   private readonly buffers = new Map<string, AudioBuffer>();
   private readonly loops = new Map<LoopName, Loop>();
@@ -81,6 +84,13 @@ export class AudioSystem {
     this.muffle.type = 'lowpass';
     this.muffle.frequency.value = 20000;
     this.muffle.connect(this.master).connect(ctx.destination);
+    this.gunBus = ctx.createDynamicsCompressor();
+    this.gunBus.threshold.value = -16;
+    this.gunBus.knee.value = 6;
+    this.gunBus.ratio.value = 12;
+    this.gunBus.attack.value = 0.001;
+    this.gunBus.release.value = 0.25;
+    this.gunBus.connect(this.muffle);
 
     // 3 s of stereo white noise feeds every synthesised layer
     this.noise = ctx.createBuffer(2, ctx.sampleRate * 3, ctx.sampleRate);
@@ -238,6 +248,22 @@ export class AudioSystem {
     const near = Math.min(1, 25 / (distance + 6));
     if (near < 0.05) return;
     playSplash(ctx, this.muffle, this.noise, ctx.currentTime + 0.01, { size, pan: pan * 0.8, near });
+  }
+
+  /** one of our guns goes off (pan / distance from the listener) */
+  cannon(pan: number, distance: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    playCannon(ctx, this.gunBus, this.noise, ctx.currentTime + 0.005, { pan: pan * 0.7, near: Math.min(1, 14 / (distance + 4)) });
+  }
+
+  /** a ball lands: heard after sound has travelled `distance` m */
+  impact(kind: 'land' | 'water', pan: number, distance: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const near = Math.min(1, 40 / (distance + 15));
+    if (near < 0.04) return;
+    playImpact(ctx, this.gunBus, this.noise, ctx.currentTime + Math.min(distance / 343, 6), kind, { pan: pan * 0.8, near });
   }
 
   /** a dolphin's blow: a short, breathy puff */

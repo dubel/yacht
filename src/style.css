@@ -25,7 +25,7 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   padding: 10px 14px; border-radius: 12px; pointer-events: none; z-index: 5; transition: opacity 1s ease; }
 #help kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.14); }
-#help.fade { opacity: 0.25; }
+#help .tog { font-weight: 400; opacity: 0.75; }
 
 #debug { position: fixed; top: 10px; left: 10px; font: 11px/1.45 var(--mono); color: #fff;
   background: rgba(0, 0, 0, 0.5); padding: 8px 10px; border-radius: 8px; z-index: 8; white-space: pre; }
@@ -78,3 +78,20 @@ body.scoped #hud, body.scoped #mission, body.scoped #minimap, body.scoped #help,
   background: linear-gradient(#f1e0b8, #dcc393); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
 #chart .tools button:hover { background: linear-gradient(#f6e8c6, #e3cc9f); }
 #chart .tools button.armed { color: #fff3e0; background: linear-gradient(#a0452e, #7a2c1c); border-color: #5a1e12; }
+
+/* ---- manning a gun: a single cross, a reload bar, a hint ---- */
+#gunsight { position: fixed; inset: 0; pointer-events: none; z-index: 7; }
+#gunsight .cross { position: absolute; left: 50%; top: 50%; width: 34px; height: 34px; transform: translate(-50%, -50%); }
+#gunsight .cross::before, #gunsight .cross::after { content: ''; position: absolute; background: rgba(255, 240, 210, 0.9);
+  box-shadow: 0 0 3px rgba(0, 0, 0, 0.8); }
+#gunsight .cross::before { left: 50%; top: 0; bottom: 0; width: 2px; transform: translateX(-50%); }
+#gunsight .cross::after { top: 50%; left: 0; right: 0; height: 2px; transform: translateY(-50%); }
+#gunsight .reload { position: absolute; left: 50%; top: calc(50% + 30px); width: 60px; height: 3px; transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.35); border-radius: 2px; overflow: hidden; }
+#gunsight .reload i { display: block; height: 100%; width: 100%; background: #ffb347; }
+#gunsight.ready .reload i { background: #9fe3a0; }
+#gunsight .hint, #gunhint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); white-space: nowrap;
+  font: 13px var(--sans); color: rgba(255, 255, 255, 0.9); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+#gunsight kbd, #gunhint kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); }
+#gunhint { bottom: 90px; z-index: 6; pointer-events: none; font-size: 15px; }
+body.manning #help, body.manning #minimap, body.manning #mission { opacity: 0.2; }

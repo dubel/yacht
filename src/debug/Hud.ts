@@ -8,30 +8,32 @@ export class Hud {
   private readonly missionEl = document.getElementById('mission')!;
   private readonly toast = document.getElementById('toast')!;
   private tick = 0;
-  private helpOn = true;
+  /** the controls panel (F8), remembered between sessions */
+  private helpOn = (() => { try { return localStorage.getItem('lagoon.help') !== 'off'; } catch { return true; } })();
 
   constructor() {
     this.el.hidden = false;
-    this.help.hidden = false;
+    this.help.hidden = !this.helpOn;
     this.missionEl.hidden = false;
     this.help.innerHTML = [
-      '<b>Sterowanie</b>',
+      '<b>Sterowanie</b> <span class="tog">(<kbd>F8</kbd> — pokaż / ukryj)</span>',
       '<kbd>A</kbd>/<kbd>D</kbd> ster &nbsp; <kbd>W</kbd>/<kbd>S</kbd> wybierz / luzuj szot',
       '<kbd>T</kbd> auto-trym &nbsp; <kbd>Spacja</kbd>/<kbd>X</kbd> zwiń / postaw żagle',
       'mysz: obrót kamery, kółko: zoom &nbsp; <kbd>V</kbd> pod wodę &nbsp; <kbd>R</kbd> reset',
       '<kbd>F</kbd> na pokład (FPP): <kbd>WASD</kbd> chodzenie, <kbd>Shift</kbd> bieg, <kbd>Spacja</kbd> skok, mysz: rozglądanie, <kbd>←</kbd>/<kbd>→</kbd> ster',
       '&nbsp;&nbsp;&nbsp;&nbsp;luneta: prawy przycisk myszy (przytrzymaj) lub <kbd>L</kbd>, kółko: przybliżenie &nbsp; <kbd>X</kbd> żagle',
+      'działa: <kbd>Ctrl</kbd> lewy / prawy — salwa z lewej / prawej burty; na pokładzie <kbd>Ctrl</kbd> przy dziale — obsadź',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
-      '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>F9</kbd> fauna wł./wył. &nbsp; <kbd>H</kbd> ukryj',
+      '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F7</kbd> widoki wody &nbsp; <kbd>F9</kbd> fauna wł./wył.',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',
     ].join('<br>');
-    setTimeout(() => this.help.classList.add('fade'), 12000);
   }
 
   toggleHelp(): void {
     this.helpOn = !this.helpOn;
     this.help.hidden = !this.helpOn;
+    try { localStorage.setItem('lagoon.help', this.helpOn ? 'on' : 'off'); } catch { /* storage unavailable */ }
   }
 
   update(g: Game): void {

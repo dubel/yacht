@@ -28,6 +28,9 @@ import { Dolphins } from '../life/Dolphins';
 import { Splash } from '../life/Splash';
 import { DeckWalker } from '../camera/DeckWalker';
 import { LENS_R, Spyglass } from '../camera/Spyglass';
+import { GunSight } from '../camera/GunSight';
+import { Guns } from '../combat/Guns';
+import { Artillery, RELOAD } from '../combat/Artillery';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
 import { placeName } from '../map/names';
 import { Vegetation } from '../world/Vegetation';
@@ -85,6 +88,13 @@ export class Game {
   /** first-person view from the deck (F) */
   onDeck = false;
   readonly spyglass = new Spyglass();
+  guns!: Guns;
+  readonly artillery = new Artillery();
+  readonly gunSight = new GunSight();
+  /** gun the sailor on deck is standing at (−1: none) */
+  private nearGun = -1;
+  /** the Ctrl that manned the gun this frame must not also fire it */
+  private justManned = false;
   private scopeT = 0;
   private scopeLabel = '';
   readonly cam: SailingCamera;
@@ -184,6 +194,23 @@ export class Game {
     this.walker.onStep = (pace) => this.audio.footstep(pace);
     this.walker.onLand = (h) => this.audio.footstep(0.5, 1 + Math.min(1.2, h * 1.6));
     this.walker.onJump = () => this.audio.footstep(0.8, 0.8);
+    this.guns = new Guns(this.boat);
+    this.scene.add(this.artillery.balls);
+    this.pipeline.late.add(this.artillery.late);
+    this.artillery.onFire = (x, _y, z) => {
+      const h = this.heardFrom(x, z);
+      this.audio.cannon(h.pan, h.d);
+      if (this.gunSight.active) this.gunSight.recoil();
+    };
+    this.artillery.onImpact = (kind, x, y, z) => {
+      if (kind === 'water') {
+        // a column of white water, and rings where the ball went in
+        this.splash.burst(x, y, z, 70, 10);
+        this.ripples.disturb(x, z, 1.4, 0.25);
+      }
+      const h = this.heardFrom(x, z);
+      this.audio.impact(kind, h.pan, h.d);
+    };
     this.spyglass.onOpen = (open) => this.audio.spyglass(open);
     this.physics = new BoatPhysics(this.boat.info, this.waves, this.wind, (x, z) => this.terrain.heightAt(x, z));
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
@@ -215,6 +242,12 @@ export class Game {
     this.resize();
     // compile everything up front so the first frames don't hitch
     this.renderer.compile(this.scene, this.cam.camera);
+    // the late pass (gun smoke, flashes) too — its meshes are hidden until the first shot, which would
+    // otherwise compile them mid-broadside
+    const hidden = this.artillery.late.children.filter((o) => !o.visible);
+    hidden.forEach((o) => (o.visible = true));
+    this.renderer.compile(this.pipeline.late, this.cam.camera);
+    hidden.forEach((o) => (o.visible = false));
   }
 
   resize(): void {
@@ -243,12 +276,25 @@ export class Game {
   private handleKeys(): void {
     const inp = this.input;
     if (inp.wasPressed('F1') || inp.wasPressed('Backquote')) this.debug.toggle();
-    const fkeys: [string, ViewMode][] = [['F2', 'final'], ['F3', 'normals'], ['F4', 'caustics'], ['F5', 'reflection'], ['F6', 'depth'], ['F7', 'ripples'], ['F8', 'fft']];
+    const fkeys: [string, ViewMode][] = [['F2', 'final'], ['F3', 'normals'], ['F4', 'caustics'], ['F5', 'reflection'], ['F6', 'depth'], ['F7', 'ripples']];
     for (const [k, v] of fkeys) if (inp.wasPressed(k)) this.view = v;
     if (inp.wasPressed('KeyR')) this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, 0);
-    if (inp.wasPressed('KeyH')) this.hud.toggleHelp();
+    // F8 (or H): the controls panel on / off
+    if (inp.wasPressed('F8') || inp.wasPressed('KeyH')) this.hud.toggleHelp();
     if (inp.wasPressed('KeyV') && !this.onDeck) this.cam.toggleDive();
     if (inp.wasPressed('KeyF')) this.setOnDeck(!this.onDeck);
+    // guns: from the chase camera, left Ctrl fires the port broadside, right Ctrl the starboard one
+    const ctrlL = inp.wasPressed('ControlLeft'), ctrlR = inp.wasPressed('ControlRight');
+    if (!this.onDeck && !this.map.open && (ctrlL || ctrlR)) this.broadside(ctrlL ? 'port' : 'starboard');
+    // on deck: Ctrl at a gun mans it; manning, Ctrl or a click fires, walking away (or Esc) leaves it
+    if (this.onDeck && !this.map.open) {
+      if (this.gunSight.active) {
+        if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Escape', 'KeyF'].some((k) => inp.wasPressed(k))) this.gunSight.exit();
+      } else if ((ctrlL || ctrlR) && this.nearGun >= 0 && this.spyglass.raise < 0.1) {
+        this.gunSight.enter(this.nearGun);
+        this.justManned = true;
+      }
+    }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
     // L: the spyglass (from the chase camera it first takes you on deck)
     if (inp.wasPressed('KeyL')) { if (!this.onDeck) this.setOnDeck(true); this.spyglass.toggle(); }
@@ -309,7 +355,10 @@ export class Game {
     this.physics.update(stepDt, t, this.input);
     const body = this.physics;
     body.applyVisuals(this.boat, t);
-    this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t);
+    {
+      const sky = this.env.skyIrradiance;
+      this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t, (sky.x + sky.y + sky.z) / 3);
+    }
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
     if (this.fauna) {
@@ -322,10 +371,16 @@ export class Game {
       this.gulls.update(stepDt, t, o, stern, body.speed, ok, this.waves, cam.position, right);
       const bow = new THREE.Vector3(o.x + Math.sin(h) * this.boat.info.hullBow, 0, o.z + Math.cos(h) * this.boat.info.hullBow);
       this.dolphins.update(stepDt, t, o, bow, h, body.speed, wp.wind < 13 && this.env.night < 0.6, this.waves);
-      // spray is white water: lit like the foam
-      const sun = this.env.sunRadiance, sky = this.env.skyIrradiance;
+    }
+    {
+      // spray (dolphins, cannonballs) is white water: lit like the foam
+      const sun = this.env.sunRadiance, sky = this.env.skyIrradiance, cam = this.cam.camera;
       const light = new THREE.Vector3(sun.x * 0.3 + sky.x * 0.6, sun.y * 0.3 + sky.y * 0.6, sun.z * 0.3 + sky.z * 0.6);
       this.splash.update(stepDt, light, this.pipeline.height, cam.fov);
+      // guns: pieces nobody mans swing back; balls in flight, smoke drifting downwind
+      this.guns.relax(stepDt, this.gunSight.active ? this.gunSight.gun : -1);
+      const wv = { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed };
+      this.artillery.update(stepDt, t, this.waves, wv, cam, this.pipeline.sceneDepth, new THREE.Vector2(this.pipeline.width, this.pipeline.height), sun, sky);
     }
     this.discovery.update(dt, body.origin.x, body.origin.z);
     this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading });
@@ -337,15 +392,33 @@ export class Game {
       this.cam.camera.position.set(c[0], c[1], c[2]);
       this.cam.camera.lookAt(c[3] ?? 0, c[4] ?? 0, c[5] ?? 0);
     } else {
-      if (this.onDeck) {
+      if (this.onDeck && this.gunSight.active) {
+        const gi = this.gunSight.gun, g = this.guns.list[gi];
+        const shot = this.gunSight.update(dt, this.input, this.boat.root, g, this.cam.camera, this.artillery.reloading, RELOAD);
+        // the piece follows the sight (a touch behind, like a heavy thing on a swivel)
+        this.guns.aim(gi, this.gunSight.yaw, this.gunSight.pitch, 1 - Math.exp(-dt * 14));
+        const inp = this.input;
+        if (!this.justManned && (inp.wasPressed('ControlLeft') || inp.wasPressed('ControlRight') || inp.click)) this.artillery.fire(shot.muzzle, shot.dir, body.velocity);
+        this.justManned = false;
+        this.guns.highlight(-1, t);
+        this.gunHint.hidden = true;
+      } else if (this.onDeck) {
         const sg = this.spyglass;
         sg.update(dt, this.input, !this.map.open);
         this.walker.scope = sg.raise;
         this.walker.magnification = sg.magnification;
         this.walker.tremor = sg.tremor();
         this.walker.update(dt, this.input, this.boat.root, this.cam.camera);
+        // walking past a gun: it lights up, Ctrl mans it
+        this.nearGun = sg.raise < 0.1 ? this.guns.near(this.walker.pos.x, this.walker.pos.y) : -1;
+        this.guns.highlight(this.nearGun, t);
+        this.gunHint.hidden = this.nearGun < 0;
+      } else {
+        this.cam.update(dt, this.input, focus, body.heading, (x, z) => this.terrain.heightAt(x, z));
+        this.nearGun = -1;
+        this.guns.highlight(-1, t);
+        this.gunHint.hidden = true;
       }
-      else this.cam.update(dt, this.input, focus, body.heading, (x, z) => this.terrain.heightAt(x, z));
     }
     this.cam.camera.updateMatrixWorld();
     this.updateLens(dt);
@@ -429,9 +502,37 @@ export class Game {
   /** F9: animals on / off; remembered between sessions */
   setFauna(on: boolean, quiet = false): void {
     this.fauna = on;
-    for (const o of [this.fish.mesh, this.gulls.mesh, this.dolphins.mesh, this.splash.points]) o.visible = on;
+    for (const o of [this.fish.mesh, this.gulls.mesh, this.dolphins.mesh]) o.visible = on;
     try { localStorage.setItem('lagoon.fauna', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
     if (!quiet) this.mission.say(on ? 'Fauna włączona (F9)' : 'Fauna wyłączona (F9)', 2.5);
+  }
+
+  private readonly gunHint = (() => {
+    const el = document.createElement('div');
+    el.id = 'gunhint';
+    el.hidden = true;
+    el.innerHTML = '<kbd>Ctrl</kbd> — obsadź działo';
+    document.body.append(el);
+    return el;
+  })();
+
+  /** where a sound comes from, relative to the camera: pan −1…1 and distance */
+  private heardFrom(x: number, z: number): { pan: number; d: number } {
+    const cam = this.cam.camera, r = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+    const dx = x - cam.position.x, dz = z - cam.position.z, d = Math.hypot(dx, dz) || 1;
+    return { pan: (dx * r.x + dz * r.z) / d, d };
+  }
+
+  /** every gun of one side, in order from the bow, a few degrees up, with the hull's heel and speed */
+  private broadside(side: 'port' | 'starboard'): void {
+    const root = this.boat.root, body = this.physics;
+    const shots = this.guns.list.filter((g) => g.side === side).map((g) => () => {
+      root.updateMatrixWorld();
+      const e = (5 * Math.PI) / 180;
+      const dir = new THREE.Vector3(g.dir.x * Math.cos(e), Math.sin(e), g.dir.z * Math.cos(e)).applyQuaternion(root.quaternion);
+      return { muzzle: g.muzzle.clone().applyMatrix4(root.matrixWorld), dir, vel: body.velocity.clone() };
+    });
+    this.artillery.broadside(shots);
   }
 
   /** switch between the chase camera and walking the deck */
@@ -444,7 +545,7 @@ export class Game {
     this.physics.wasd = !on;
     this.input.wantLock = on;
     if (on) this.walker.spawn(this.boat.info.hullStern);
-    else { this.input.unlock(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+    else { this.input.unlock(); this.gunSight.exit(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
   }
 
   /** is the top of the island at (x, z) visible from the eye, or does nearer land stand in the way? */

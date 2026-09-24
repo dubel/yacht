@@ -26,7 +26,7 @@ export class DebugUI {
       `FFT ${Config.fft.N}² @ ${Config.fft.L} m   ripples ${Config.ripples.N}² @ ${Config.ripples.size} m`,
       `caustics ${Config.caustics.size}² (grid ${Config.caustics.grid})   plants ${g.terrain.stats.plants} (${g.terrain.stats.plantsNear} full)   fish ${g.fish.count}   gulls ${g.gulls.count}   dolphins ${g.dolphins.count} (${g.dolphins.status})`,
       `terrain ${g.terrain.stats.meshes}/${g.terrain.stats.tiles} tiles  ${(g.terrain.stats.vertices / 1000).toFixed(0)}k verts  queue ${g.terrain.backlog}   pos ${p.origin.x.toFixed(0)}, ${p.origin.z.toFixed(0)}`,
-      `view  ${g.view}   [F2 final F3 normals F4 caustics F5 refl F6 depth F7 ripples F8 fft]`,
+      `view  ${g.view}   [F2 final F3 normals F4 caustics F5 refl F6 depth F7 ripples]`,
       ``,
       `wind  ${g.wind.speed.toFixed(1)} m/s from ${((g.wind.from * 180) / Math.PI).toFixed(0)}°`,
       `boat  ${t.kn} kn  brg ${t.bearing}°  heel ${t.heel}°  pitch ${t.pitch}°`,

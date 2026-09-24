@@ -7,6 +7,8 @@ import type { UnderwaterPass } from './water/UnderwaterPass';
 /**
  * Frame: opaque scene (MSAA, HDR + depth) → planar reflection (mirror camera, clipped at y=0)
  * → composite = scene colour + water mesh (samples scene colour/depth for refraction & thickness)
+ * → late pass: transparent effects (gun smoke, muzzle flashes) over the water, depth-tested against the
+ *   water in hardware and against the opaque scene by hand (soft particles, see `sceneDepth`)
  * → post (bloom, ACES, grade) → canvas.
  */
 export class Pipeline {
@@ -23,6 +25,8 @@ export class Pipeline {
   private readonly copyMat = passMaterial(`uniform sampler2D uSrc; void main(){ o = texture(uSrc, vUv); }`, { uSrc: { value: null } });
   private readonly mirrorCam = new THREE.PerspectiveCamera();
   private readonly waterScene = new THREE.Scene();
+  /** drawn after the water surface (see the class comment) */
+  readonly late = new THREE.Scene();
   private readonly clipPlane = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.08)];
   private readonly tmpM = new THREE.Matrix4();
   private readonly tmpV = new THREE.Vector3();
@@ -57,6 +61,8 @@ export class Pipeline {
   }
 
   get sceneTarget() { return this.sceneRT; }
+  /** depth of the opaque scene (for effects drawn in the late pass) */
+  get sceneDepth(): THREE.Texture { return this.sceneRT.depthTexture!; }
   get reflectionTarget() { return this.reflRT; }
 
   private updateMirror(cam: THREE.PerspectiveCamera): void {
@@ -128,6 +134,7 @@ export class Pipeline {
     r.setRenderTarget(this.compRT);
     r.clear(false, true, false);
     r.render(this.waterScene, cam);
+    if (this.late.children.some((o) => o.visible)) r.render(this.late, cam);
 
     // 4. when the lens may be under water: extinction, in-scatter and light shafts along every view ray that
     //    starts below the surface — applied last, over both the scene and the surface seen from below,

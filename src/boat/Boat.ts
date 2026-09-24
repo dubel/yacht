@@ -39,12 +39,17 @@ export class Boat {
     new THREE.MeshBasicMaterial({ color: new THREE.Color(0, 0, 0), toneMapped: false }),
   );
 
-  /** 0 = off … 1 = full night */
-  setLantern(k: number, t: number): void {
+  /**
+   * `k`: 0 = off … 1 = full night; `daylight`: brightness of the sky light (≈ irradiance) — an unlit lantern
+   * is a pale, slightly warm glass globe catching the daylight, not a dark ball
+   */
+  setLantern(k: number, t: number, daylight = 0): void {
     const flicker = 0.92 + 0.05 * Math.sin(t * 13.1) + 0.03 * Math.sin(t * 29.7);
     this.lantern.intensity = 9 * k * flicker;
     this.lantern.visible = k > 0.01;
-    (this.lanternGlass.material as THREE.MeshBasicMaterial).color.setRGB(1, 0.62, 0.3).multiplyScalar(0.05 + 30 * k * flicker);
+    const glass = 1.5 * daylight;
+    (this.lanternGlass.material as THREE.MeshBasicMaterial).color.setRGB(
+      0.92 * glass + 30 * k * flicker, 0.88 * glass + 18.6 * k * flicker, 0.78 * glass + 9 * k * flicker);
   }
 
   /** sail visuals follow the physics (trim angle, furling, luffing) */
