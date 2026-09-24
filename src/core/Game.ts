@@ -22,6 +22,7 @@ import { ChannelMarkers } from '../world/ChannelMarkers';
 import { Discovery } from '../map/Discovery';
 import { MapUI } from '../map/MapUI';
 import { DeckMap } from '../boat/DeckMap';
+import { FishLife } from '../life/Fish';
 import { DeckWalker } from '../camera/DeckWalker';
 import { LENS_R, Spyglass } from '../camera/Spyglass';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
@@ -67,6 +68,7 @@ export class Game {
   vegetation!: Vegetation;
   mission!: Mission;
   readonly markers = new ChannelMarkers();
+  readonly fish = new FishLife();
   readonly discovery = new Discovery(Config.worldSeed);
   map!: MapUI;
   physics!: BoatPhysics;
@@ -178,7 +180,7 @@ export class Game {
     this.physics = new BoatPhysics(this.boat.info, this.waves, this.wind, (x, z) => this.terrain.heightAt(x, z));
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
-    this.scene.add(this.mission.group, this.markers.group);
+    this.scene.add(this.mission.group, this.markers.group, this.fish.mesh);
     this.map = new MapUI(this.discovery, Config.worldSeed);
     progress(1);
 
@@ -281,6 +283,7 @@ export class Game {
     this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t);
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
+    this.fish.update(stepDt, body.origin, body.origin, 1 - this.env.night);
     this.discovery.update(dt, body.origin.x, body.origin.z);
     this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading });
 
