@@ -6,6 +6,7 @@
  */
 
 import { playFootstep } from './footsteps';
+import { playSplash } from './water';
 
 export interface AudioState {
   windSpeed: number;
@@ -230,44 +231,13 @@ export class AudioSystem {
     this.play(g, 0.15 + 0.55 * near, { pan: pan * 0.8, rate: 0.9 + Math.random() * 0.25, lowpass: 2500 + 12000 * near });
   }
 
-  /** water broken by a leaping dolphin: a slap and a gurgle; `size` 1 … 4 */
+  /** water broken by a leaping dolphin; `size` 1 … 4 */
   splash(pan: number, distance: number, size: number): void {
     const ctx = this.ctx;
     if (!ctx) return;
     const near = Math.min(1, 25 / (distance + 6));
     if (near < 0.05) return;
-    const t = ctx.currentTime + 0.01;
-    const out = ctx.createStereoPanner();
-    out.pan.value = pan * 0.8;
-    const lp = ctx.createBiquadFilter();
-    lp.type = 'lowpass';
-    lp.frequency.value = 1500 + 7000 * near;
-    lp.connect(out).connect(this.muffle);
-    // the slap: a noise burst, bright then falling
-    const src = ctx.createBufferSource();
-    src.buffer = this.noise;
-    src.start(t, Math.random() * 2, 0.6);
-    const band = ctx.createBiquadFilter();
-    band.type = 'bandpass';
-    band.Q.value = 0.8;
-    band.frequency.setValueAtTime(2400, t);
-    band.frequency.exponentialRampToValueAtTime(500, t + 0.35);
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(0.18 * size * near, t + 0.006);
-    g.gain.setTargetAtTime(0, t + 0.01, 0.09 + 0.03 * size);
-    src.connect(band).connect(g).connect(lp);
-    // the plunge: a short falling tone
-    const osc = ctx.createOscillator();
-    osc.frequency.setValueAtTime(220, t + 0.02);
-    osc.frequency.exponentialRampToValueAtTime(70, t + 0.14);
-    const og = ctx.createGain();
-    og.gain.setValueAtTime(0, t + 0.02);
-    og.gain.linearRampToValueAtTime(0.12 * near * Math.min(size, 2.5), t + 0.03);
-    og.gain.setTargetAtTime(0, t + 0.05, 0.04);
-    osc.connect(og).connect(lp);
-    osc.start(t + 0.02);
-    osc.stop(t + 0.4);
+    playSplash(ctx, this.muffle, this.noise, ctx.currentTime + 0.01, { size, pan: pan * 0.8, near });
   }
 
   /** a dolphin's blow: a short, breathy puff */

@@ -35,7 +35,35 @@ export class MapUI {
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.textContent = 'przeciągnij — przesuń · kółko — przybliż · C — wyśrodkuj · Tab / Esc — zamknij';
-    this.overlay.append(this.big, hint);
+    // wiping the chart: each button asks once ("sure?") and acts on a second click within 3 s
+    const tools = document.createElement('div');
+    tools.className = 'tools';
+    const button = (label: string, confirm: string, act: () => void) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = label;
+      let armed = 0;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (armed) {
+          clearTimeout(armed);
+          armed = 0;
+          b.textContent = label;
+          b.classList.remove('armed');
+          act();
+          this.bigDirty = true;
+          this.miniDone = false;
+          return;
+        }
+        b.textContent = confirm;
+        b.classList.add('armed');
+        armed = window.setTimeout(() => { armed = 0; b.textContent = label; b.classList.remove('armed'); }, 3000);
+      });
+      tools.append(b);
+    };
+    button('Wyczyść trasę', 'Na pewno? Kliknij ponownie', () => this.discovery.clearTrack());
+    button('Zapomnij odkrycia', 'Na pewno? Kliknij ponownie', () => this.discovery.clearDiscovered());
+    this.overlay.append(this.big, hint, tools);
     document.body.append(this.miniWrap, this.overlay);
 
     // pan / zoom on the big chart

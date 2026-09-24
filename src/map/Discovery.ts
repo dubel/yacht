@@ -116,6 +116,24 @@ export class Discovery {
     if (any) { this.version++; this.dirty = true; }
   }
 
+  /** wipe the sailed track (the discovered waters stay) */
+  clearTrack(): void {
+    this.track.length = 0;
+    this.lastX = this.lastZ = Infinity; // the next update starts a fresh line where the boat is
+    this.version++;
+    this.dirty = true;
+    this.save();
+  }
+
+  /** forget the discovered waters (the track stays); the boat's surroundings come back on the next update */
+  clearDiscovered(): void {
+    this.chunks.clear();
+    this.lastX = this.lastZ = Infinity;
+    this.version++;
+    this.dirty = true;
+    this.save();
+  }
+
   /** forget everything for this world (debug) */
   clear(): void {
     this.chunks.clear();
