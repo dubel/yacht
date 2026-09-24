@@ -31,6 +31,8 @@ import { LENS_R, Spyglass } from '../camera/Spyglass';
 import { GunSight } from '../camera/GunSight';
 import { Guns } from '../combat/Guns';
 import { Artillery, RELOAD } from '../combat/Artillery';
+import { Musketry } from '../combat/Musketry';
+import { Weapons } from '../fpv/Weapons';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
 import { placeName } from '../map/names';
 import { Vegetation } from '../world/Vegetation';
@@ -91,6 +93,8 @@ export class Game {
   guns!: Guns;
   readonly artillery = new Artillery();
   readonly gunSight = new GunSight();
+  readonly weapons = new Weapons();
+  musketry!: Musketry;
   /** gun the sailor on deck is standing at (−1: none) */
   private nearGun = -1;
   /** the Ctrl that manned the gun this frame must not also fire it */
@@ -195,6 +199,23 @@ export class Game {
     this.walker.onLand = (h) => this.audio.footstep(0.5, 1 + Math.min(1.2, h * 1.6));
     this.walker.onJump = () => this.audio.footstep(0.8, 0.8);
     this.guns = new Guns(this.boat);
+    // what the sailor carries: pistol and rapier, drawn over everything
+    this.pipeline.overlay = this.weapons.overlay;
+    this.musketry = new Musketry(this.deck, this.boat.root);
+    this.scene.add(this.musketry.mesh);
+    this.weapons.onPan = () => this.audio.pistol(0.085);
+    this.weapons.onReady = () => this.audio.cock();
+    this.weapons.onSlash = (cut) => this.audio.swoosh(cut === 0 ? 0.3 : -0.3);
+    this.weapons.onPistol = (muzzle, dir) => {
+      this.musketry.fire(muzzle, dir, this.physics.velocity);
+      this.artillery.pistolSmoke(muzzle, dir);
+    };
+    this.musketry.onHit = (kind, at) => {
+      this.artillery.chips(at, kind === 'ricochet' ? 'wood' : kind);
+      if (kind === 'water') { this.splash.burst(at.x, at.y, at.z, 10, 3); this.ripples.disturb(at.x, at.z, 0.35, 0.04); }
+      const h = this.heardFrom(at.x, at.z);
+      this.audio.bullet(kind, h.pan, Math.hypot(h.d, at.y - this.cam.camera.position.y));
+    };
     this.scene.add(this.artillery.balls);
     this.pipeline.late.add(this.artillery.late);
     this.artillery.onFire = (x, _y, z) => {
@@ -248,6 +269,11 @@ export class Game {
     hidden.forEach((o) => (o.visible = true));
     this.renderer.compile(this.pipeline.late, this.cam.camera);
     hidden.forEach((o) => (o.visible = false));
+    // and what the sailor carries (hidden until drawn)
+    const held = this.weapons.overlay.getObjectsByProperty('visible', false);
+    held.forEach((o) => (o.visible = true));
+    this.renderer.compile(this.weapons.overlay, this.cam.camera);
+    held.forEach((o) => (o.visible = false));
   }
 
   resize(): void {
@@ -290,12 +316,20 @@ export class Game {
     if (this.onDeck && !this.map.open) {
       if (this.gunSight.active) {
         if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Escape', 'KeyF'].some((k) => inp.wasPressed(k))) this.gunSight.exit();
-      } else if ((ctrlL || ctrlR) && this.nearGun >= 0 && this.spyglass.raise < 0.1) {
+      } else if ((ctrlL || ctrlR) && this.nearGun >= 0 && this.spyglass.raise < 0.1 && !this.weapons.drawn) {
         this.gunSight.enter(this.nearGun);
         this.justManned = true;
       }
     }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
+    // 1 pistol, 2 rapier (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
+    const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit0') ? 'spyglass' : null;
+    if (slot && !this.map.open) {
+      if (!this.onDeck) this.setOnDeck(true);
+      if (this.gunSight.active) this.gunSight.exit();
+      if (slot === 'spyglass') { this.weapons.holster(); this.spyglass.toggle(); }
+      else { this.spyglass.close(); this.weapons.select(slot); }
+    }
     // L: the spyglass (from the chase camera it first takes you on deck)
     if (inp.wasPressed('KeyL')) { if (!this.onDeck) this.setOnDeck(true); this.spyglass.toggle(); }
     if (inp.wasPressed('KeyN')) this.weather.cycle();
@@ -380,6 +414,7 @@ export class Game {
       // guns: pieces nobody mans swing back; balls in flight, smoke drifting downwind
       this.guns.relax(stepDt, this.gunSight.active ? this.gunSight.gun : -1);
       const wv = { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed };
+      this.musketry.update(stepDt, t, this.waves);
       this.artillery.update(stepDt, t, this.waves, wv, cam, this.pipeline.sceneDepth, new THREE.Vector2(this.pipeline.width, this.pipeline.height), sun, sky);
     }
     this.discovery.update(dt, body.origin.x, body.origin.z);
@@ -402,6 +437,8 @@ export class Game {
         this.justManned = false;
         this.guns.highlight(-1, t);
         this.gunHint.hidden = true;
+        this.weapons.overlay.visible = false;
+        this.weapons.hideHud();
       } else if (this.onDeck) {
         const sg = this.spyglass;
         sg.update(dt, this.input, !this.map.open);
@@ -409,8 +446,13 @@ export class Game {
         this.walker.magnification = sg.magnification;
         this.walker.tremor = sg.tremor();
         this.walker.update(dt, this.input, this.boat.root, this.cam.camera);
-        // walking past a gun: it lights up, Ctrl mans it
-        this.nearGun = sg.raise < 0.1 ? this.guns.near(this.walker.pos.x, this.walker.pos.y) : -1;
+        // what is in hand: follows the view, fires / cuts on Ctrl
+        const L = this.env.light;
+        this.weapons.update(dt, this.input, this.cam.camera, this.walker.stride, sg.raise > 0.08 || this.map.open,
+          this.env.lightDir, L.color, L.intensity, this.scene.environment);
+        this.weapons.markSpyglass(sg.raise > 0.3);
+        // walking past a gun (empty-handed): it lights up, Ctrl mans it
+        this.nearGun = sg.raise < 0.1 && !this.weapons.drawn ? this.guns.near(this.walker.pos.x, this.walker.pos.y) : -1;
         this.guns.highlight(this.nearGun, t);
         this.gunHint.hidden = this.nearGun < 0;
       } else {
@@ -418,6 +460,8 @@ export class Game {
         this.nearGun = -1;
         this.guns.highlight(-1, t);
         this.gunHint.hidden = true;
+        this.weapons.overlay.visible = false;
+        this.weapons.hideHud();
       }
     }
     this.cam.camera.updateMatrixWorld();
@@ -545,7 +589,7 @@ export class Game {
     this.physics.wasd = !on;
     this.input.wantLock = on;
     if (on) this.walker.spawn(this.boat.info.hullStern);
-    else { this.input.unlock(); this.gunSight.exit(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+    else { this.input.unlock(); this.gunSight.exit(); this.weapons.stow(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
   }
 
   /** is the top of the island at (x, z) visible from the eye, or does nearer land stand in the way? */

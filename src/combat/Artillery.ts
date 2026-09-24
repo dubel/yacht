@@ -218,6 +218,25 @@ void main(){
     this.onFire?.(muzzle.x, muzzle.y, muzzle.z);
   }
 
+  /** a pistol shot: a small cloud thrown out of the muzzle along `dir` */
+  pistolSmoke(muzzle: THREE.Vector3, dir: THREE.Vector3): void {
+    for (let k = 0; k < 9; k++) {
+      const v = 2 + Math.random() * 7;
+      this.puff(muzzle, dir.x * v + (Math.random() - 0.5), dir.y * v + Math.random() * 0.6, dir.z * v + (Math.random() - 0.5),
+        0.14 + Math.random() * 0.14, 0.45 + Math.random() * 0.35, 3 + Math.random() * 2, 0.8 + Math.random() * 0.15, 0, 0.7);
+    }
+  }
+
+  /** a ball striking: splinters of wood (dark), a spurt of sand/earth, or spray — small */
+  chips(at: THREE.Vector3, kind: 'wood' | 'land' | 'water'): void {
+    const n = kind === 'water' ? 5 : 6;
+    for (let k = 0; k < n; k++) {
+      const a = Math.random() * 6.28, v = 0.6 + Math.random() * 1.5;
+      this.puff(at, Math.cos(a) * v, 1 + Math.random() * 2.5, Math.sin(a) * v, kind === 'wood' ? 0.06 : 0.12, 0.3, 0.8 + Math.random() * 0.6,
+        kind === 'water' ? 1.25 : 0.75, kind === 'water' ? 0 : 1, kind === 'water' ? 0.7 : 0.8, kind === 'water' ? 0.8 : 0.4);
+    }
+  }
+
   /** one billboard: `tint` 0 smoke … 1 earth, `fall` 0 buoyant smoke … 1 falls like water */
   private puff(at: THREE.Vector3, vx: number, vy: number, vz: number, size: number, grow: number, life: number, shade: number, tint: number, opacity: number, fall = 0): void {
     const i = this.sNext;

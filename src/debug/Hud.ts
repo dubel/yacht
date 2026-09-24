@@ -23,6 +23,7 @@ export class Hud {
       '<kbd>F</kbd> na pokład (FPP): <kbd>WASD</kbd> chodzenie, <kbd>Shift</kbd> bieg, <kbd>Spacja</kbd> skok, mysz: rozglądanie, <kbd>←</kbd>/<kbd>→</kbd> ster',
       '&nbsp;&nbsp;&nbsp;&nbsp;luneta: prawy przycisk myszy (przytrzymaj) lub <kbd>L</kbd>, kółko: przybliżenie &nbsp; <kbd>X</kbd> żagle',
       'działa: <kbd>Ctrl</kbd> lewy / prawy — salwa z lewej / prawej burty; na pokładzie <kbd>Ctrl</kbd> przy dziale — obsadź',
+      'na pokładzie: <kbd>1</kbd> pistolet, <kbd>2</kbd> rapier, <kbd>0</kbd> luneta — <kbd>Ctrl</kbd> / lewy przycisk: strzał / cięcie',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
       '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F7</kbd> widoki wody &nbsp; <kbd>F9</kbd> fauna wł./wył.',

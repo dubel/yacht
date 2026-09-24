@@ -95,3 +95,13 @@ body.scoped #hud, body.scoped #mission, body.scoped #minimap, body.scoped #help,
 #gunsight kbd, #gunhint kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); }
 #gunhint { bottom: 90px; z-index: 6; pointer-events: none; font-size: 15px; }
 body.manning #help, body.manning #minimap, body.manning #mission { opacity: 0.2; }
+
+/* ---- on deck: what is in hand ---- */
+#aimdot { position: fixed; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%;
+  background: rgba(255, 245, 225, 0.9); box-shadow: 0 0 3px rgba(0, 0, 0, 0.9); pointer-events: none; z-index: 7; }
+#aimdot.loading { background: #ffb347; }
+#slots { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 14px; pointer-events: none; z-index: 6;
+  font: 13px var(--sans); color: rgba(255, 255, 255, 0.55); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
+#slots span.on { color: #ffe2a8; }
+#slots kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.16); }
+body.scoped #slots, body.manning #slots { opacity: 0; }

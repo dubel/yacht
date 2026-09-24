@@ -139,6 +139,13 @@ export class DeckMap {
     for (let k = 0; k < this.floor.length; k++) if (this.y[k] === OFF) this.floor[k] = OFF;
   }
 
+  /** top of whatever is at a boat-frame point — deck, rail, mast, cabin roof (up to head height) — or OFF */
+  rawAt(x: number, z: number): number {
+    const i = Math.floor((x - this.x0) / RES), j = Math.floor((z - this.z0) / RES);
+    if (i < 0 || j < 0 || i >= this.w || j >= this.h) return OFF;
+    return this.y[j * this.w + i];
+  }
+
   /** walkable floor height at a boat-frame point (nearest sample), OFF over the side */
   at(x: number, z: number): number {
     const i = Math.floor((x - this.x0) / RES), j = Math.floor((z - this.z0) / RES);

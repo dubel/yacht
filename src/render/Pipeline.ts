@@ -27,6 +27,8 @@ export class Pipeline {
   private readonly waterScene = new THREE.Scene();
   /** drawn after the water surface (see the class comment) */
   readonly late = new THREE.Scene();
+  /** drawn last of all with the depth cleared: what the sailor holds (never sinks into a rail or a mast) */
+  overlay: THREE.Scene | null = null;
   private readonly clipPlane = [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0.08)];
   private readonly tmpM = new THREE.Matrix4();
   private readonly tmpV = new THREE.Vector3();
@@ -135,6 +137,10 @@ export class Pipeline {
     r.clear(false, true, false);
     r.render(this.waterScene, cam);
     if (this.late.children.some((o) => o.visible)) r.render(this.late, cam);
+    if (this.overlay?.visible && submerged < -1.2) {
+      r.clear(false, true, false);
+      r.render(this.overlay, cam);
+    }
 
     // 4. when the lens may be under water: extinction, in-scatter and light shafts along every view ray that
     //    starts below the surface — applied last, over both the scene and the surface seen from below,

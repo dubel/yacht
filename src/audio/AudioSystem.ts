@@ -8,6 +8,7 @@
 import { playFootstep } from './footsteps';
 import { playSplash } from './water';
 import { playCannon, playImpact } from './guns';
+import { playCock, playFlint, playPistol, playSwoosh, playWoodHit } from './smallarms';
 
 export interface AudioState {
   windSpeed: number;
@@ -279,6 +280,40 @@ export class AudioSystem {
       return;
     }
     playImpact(ctx, this.gunBus, this.noise, ctx.currentTime + delay, kind, { pan: pan * 0.8, near });
+  }
+
+  // ---- small arms (the sailor's own: close by, in the middle) ----
+  /** the flint strikes; the shot itself follows `hang` s later */
+  pistol(hang: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.003;
+    playFlint(ctx, this.gunBus, this.noise, t, { pan: 0.15, near: 0.9 });
+    playPistol(ctx, this.gunBus, this.noise, t + hang, { pan: 0.1, near: 1 });
+  }
+
+  cock(): void {
+    if (this.ctx) playCock(this.ctx, this.muffle, this.noise, this.ctx.currentTime + 0.003, { pan: 0.2, near: 0.8 });
+  }
+
+  swoosh(pan: number): void {
+    if (this.ctx) playSwoosh(this.ctx, this.muffle, this.noise, this.ctx.currentTime + 0.003, { pan, near: 1 });
+  }
+
+  /** a pistol ball lands: in wood (`skip` = ricochet), in the water, on land */
+  bullet(kind: 'wood' | 'ricochet' | 'water' | 'land', pan: number, distance: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const near = Math.min(1, 12 / (distance + 4));
+    if (near < 0.03) return;
+    const when = ctx.currentTime + Math.min(distance / 343, 3);
+    if (kind === 'wood' || kind === 'ricochet') { playWoodHit(ctx, this.muffle, this.noise, when, kind === 'ricochet', { pan: pan * 0.8, near }); return; }
+    if (kind === 'water') {
+      const name = (['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)];
+      this.play(name, 0.45 * near, { pan: pan * 0.8, delay: when - ctx.currentTime, rate: 1.15 + Math.random() * 0.25, lowpass: 2000 + 12000 * near });
+      return;
+    }
+    playImpact(ctx, this.muffle, this.noise, when, 'land', { pan: pan * 0.8, near: near * 0.5 });
   }
 
   /** a dolphin's blow: a short, breathy puff */
