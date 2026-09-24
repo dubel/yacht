@@ -13,6 +13,8 @@ export class Input {
   rmb = false;
   /** left button pressed this frame (fires a manned gun) */
   click = false;
+  /** left button held */
+  lmb = false;
   private ctrlAt = -1e9;
   /** lock the pointer on the next click on the canvas (set by the first-person view) */
   wantLock = false;
@@ -56,12 +58,12 @@ export class Input {
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     // right button: tracked on its own (it also arrives while the pointer is locked); no context menu
-    el.addEventListener('mousedown', (e) => { if (e.button === 2) this.rmb = true; if (e.button === 0) this.click = true; });
+    el.addEventListener('mousedown', (e) => { if (e.button === 2) this.rmb = true; if (e.button === 0) { this.click = true; this.lmb = true; } });
     // Ctrl+W / Ctrl+T can't be blocked; right after a Ctrl, closing the page asks first
     addEventListener('beforeunload', (e) => { if (performance.now() - this.ctrlAt < 2000) e.preventDefault(); });
-    addEventListener('mouseup', (e) => { if (e.button === 2) this.rmb = false; });
+    addEventListener('mouseup', (e) => { if (e.button === 2) this.rmb = false; if (e.button === 0) this.lmb = false; });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
-    addEventListener('blur', () => { this.rmb = false; });
+    addEventListener('blur', () => { this.rmb = this.lmb = false; });
     el.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
   }
 

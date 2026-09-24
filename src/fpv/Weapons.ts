@@ -1,19 +1,23 @@
 import * as THREE from 'three';
 import type { Input } from '../core/Input';
-import { makePistol, makeRapier, type Pistol, type Rapier } from './models';
+import { makeLantern, makePistol, makeRapier, type Lantern, type Pistol, type Rapier } from './models';
 
 /*
- * What the sailor holds on deck: 1 the flintlock pistol, 2 the rapier (the spyglass, 0, is its own thing).
+ * What the sailor holds on deck: 1 the flintlock pistol, 2 the rapier, 3 a lantern (the spyglass, 0, is its
+ * own thing).
  * The models live in an overlay scene drawn last with the depth cleared, so a barrel or blade never sinks
  * into a rail or a mast; the overlay's root follows the camera every frame, and the held piece sits in it
  * at arm's length, swaying a little behind the mouse and bobbing with the stride.
  *
  * Pistol: Ctrl (or a click) lets the cock fall — the pan flashes, and a heartbeat later the charge goes off
  * (flash, recoil, a ball on its way); it takes RELOAD s to load again. Rapier: Ctrl cuts, alternately from
- * high left to low right and from high right to low left, a fading trail behind the blade.
+ * high left to low right and from high right to low left, a fading trail behind the blade. Lantern: held
+ * overhand by the bail, swinging like a pendulum as the sailor walks and turns; it lights the world (a real
+ * light in the main scene, so the deck, the sails, the sea — and one day a beach — are lit by it) and the hand
+ * that holds it; Ctrl held lifts it higher and forward, to light further.
  */
 
-export type Weapon = 'none' | 'pistol' | 'rapier';
+export type Weapon = 'none' | 'pistol' | 'rapier' | 'lantern';
 
 const PISTOL_RELOAD = 3;
 const SLASH_TIME = 0.42;
@@ -24,6 +28,8 @@ const pose = (x: number, y: number, z: number, rx: number, ry: number, rz: numbe
 
 const PISTOL_REST = pose(0.16, -0.105, -0.42, 0.04, 0.08, 0);
 const RAPIER_GUARD = pose(0.17, -0.13, -0.36, 0.32, 0.22, -0.35);
+const LANTERN_HOLD = pose(0.2, -0.01, -0.43, 0.05, -0.25, 0);
+const LANTERN_UP = pose(0.1, 0.12, -0.56, 0.2, -0.1, 0);
 // the two cuts: start (high, to one side, blade raised) → end (low, across the other side)
 const CUTS: [Pose, Pose][] = [
   [pose(-0.06, 0.06, -0.3, 1.25, 0.75, -0.9), pose(0.34, -0.36, -0.36, -0.55, -0.85, -0.9)],
@@ -46,6 +52,14 @@ export class Weapons {
   private readonly root = new THREE.Group();
   private readonly pistol: Pistol;
   private readonly rapier: Rapier;
+  private readonly lantern: Lantern;
+  /** the lantern's light in the world (in the main scene from the start, dark until the lantern is held) */
+  readonly worldLight = new THREE.PointLight(0xffa850, 0, 20, 2);
+  private readonly handLight = new THREE.PointLight(0xffa850, 0, 1.5, 2);
+  private readonly swing = new THREE.Vector2();
+  private readonly swingV = new THREE.Vector2();
+  private lift = 0;
+  private time = 0;
   private readonly flash: THREE.Sprite;
   private readonly flashLight = new THREE.PointLight(0xffa050, 0, 3, 2);
   private readonly trail: THREE.Mesh;
@@ -69,7 +83,10 @@ export class Weapons {
   constructor() {
     this.pistol = makePistol();
     this.rapier = makeRapier();
-    this.root.add(this.pistol.group, this.rapier.group);
+    this.lantern = makeLantern();
+    this.lantern.flame.add(this.handLight);
+    this.root.add(this.pistol.group, this.rapier.group, this.lantern.group);
+    this.lantern.group.visible = false;
     this.overlay.add(this.root, this.light, this.light.target);
     this.pistol.group.visible = this.rapier.group.visible = false;
 
@@ -108,7 +125,7 @@ export class Weapons {
     this.dot.hidden = true;
     this.slots.id = 'slots';
     this.slots.hidden = true;
-    this.slots.innerHTML = '<span data-w="pistol"><kbd>1</kbd> pistolet</span><span data-w="rapier"><kbd>2</kbd> rapier</span><span data-w="spyglass"><kbd>0</kbd> luneta</span>';
+    this.slots.innerHTML = '<span data-w="pistol"><kbd>1</kbd> pistolet</span><span data-w="rapier"><kbd>2</kbd> rapier</span><span data-w="lantern"><kbd>3</kbd> latarnia</span><span data-w="spyglass"><kbd>0</kbd> luneta</span>';
     document.body.append(this.dot, this.slots);
   }
 
@@ -131,7 +148,8 @@ export class Weapons {
     this.weapon = this.held = 'none';
     this.draw = 0;
     this.slashT = -1;
-    this.pistol.group.visible = this.rapier.group.visible = false;
+    this.pistol.group.visible = this.rapier.group.visible = this.lantern.group.visible = false;
+    this.worldLight.intensity = this.handLight.intensity = 0;
     this.dot.hidden = this.slots.hidden = true;
   }
 
@@ -148,6 +166,8 @@ export class Weapons {
     } else if (this.held !== 'none') this.draw = Math.min(1, this.draw + dt / 0.3);
     this.pistol.group.visible = this.held === 'pistol';
     this.rapier.group.visible = this.held === 'rapier';
+    this.lantern.group.visible = this.held === 'lantern';
+    this.time += dt;
 
     // ---- use it ----
     const pull = !lowered && this.draw > 0.95 && (input.wasPressed('ControlLeft') || input.wasPressed('ControlRight') || input.click);
@@ -209,6 +229,14 @@ export class Weapons {
       q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.55 * k, 0, 0.1 * k)));
     } else if (this.held === 'rapier') {
       this.rapierPose(p, q);
+    } else if (this.held === 'lantern') {
+      // Ctrl held: lift it up and out in front
+      const up = !lowered && (input.isDown('ControlLeft') || input.isDown('ControlRight') || input.lmb);
+      this.lift += ((up ? 1 : 0) - this.lift) * (1 - Math.exp(-dt * 6));
+      const k = this.lift * this.lift * (3 - 2 * this.lift);
+      p.lerpVectors(LANTERN_HOLD.p, LANTERN_UP.p, k);
+      q.slerpQuaternions(new THREE.Quaternion().setFromEuler(LANTERN_HOLD.r), new THREE.Quaternion().setFromEuler(LANTERN_UP.r), k);
+      this.swingLantern(dt);
     }
     // drawing / putting away: from below the frame
     const d = 1 - this.draw;
@@ -216,7 +244,7 @@ export class Weapons {
     q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.9 * d * d, 0, 0)));
     p.x += this.swayX + Math.sin(this.bobPhase) * 0.007 * this.bob;
     p.y += this.swayY - Math.abs(Math.cos(this.bobPhase)) * 0.009 * this.bob;
-    const held = this.held === 'pistol' ? this.pistol.group : this.rapier.group;
+    const held = this.held === 'pistol' ? this.pistol.group : this.held === 'rapier' ? this.rapier.group : this.lantern.group;
     held.position.copy(p);
     held.quaternion.copy(q);
 
@@ -233,6 +261,7 @@ export class Weapons {
     this.overlay.environmentIntensity = 0.5;
     this.overlay.visible = this.held !== 'none';
     this.updateTrail(dt);
+    this.updateLight();
 
     // ---- HUD: the aiming dot (amber while loading), the slots ----
     this.dot.hidden = !(this.held === 'pistol' && this.draw > 0.9);
@@ -248,6 +277,35 @@ export class Weapons {
 
   hideHud(): void {
     this.dot.hidden = this.slots.hidden = true;
+  }
+
+  /**
+   * The lantern hangs from the hand: a damped pendulum, kicked by the hand's own motion — the view turning
+   * (sway), the stride's bob, lifting it — so it lags, overshoots and settles.
+   */
+  private swingLantern(dt: number): void {
+    const g = 9.81 / 0.16; // ω² of a ~16 cm pendulum
+    const push = new THREE.Vector2(this.swayX * 900 + Math.sin(this.bobPhase) * 6 * this.bob, this.swayY * 700 + Math.cos(this.bobPhase * 2) * 3 * this.bob);
+    this.swingV.x += (-g * this.swing.x - 2.2 * this.swingV.x + push.x) * dt;
+    this.swingV.y += (-g * this.swing.y - 2.2 * this.swingV.y + push.y) * dt;
+    this.swing.addScaledVector(this.swingV, dt);
+    this.swing.clampScalar(-0.6, 0.6);
+    this.lantern.body.rotation.set(this.swing.y, 0, this.swing.x);
+  }
+
+  /** the flame flickers; its light follows it in the world and warms the hand */
+  private updateLight(): void {
+    const on = this.held === 'lantern' ? this.draw : 0;
+    const t = this.time;
+    const flicker = 0.86 + 0.08 * Math.sin(t * 11.3) + 0.05 * Math.sin(t * 23.7 + 1.3) + 0.03 * Math.sin(t * 41.1);
+    this.worldLight.intensity = 7 * on * flicker;
+    this.handLight.intensity = 0.35 * on * flicker;
+    this.lantern.glass.emissiveIntensity = 0.3 * flicker;
+    this.lantern.flame.scale.set(1, 0.85 + 0.3 * (flicker - 0.86) / 0.16, 1);
+    if (on > 0) {
+      this.root.updateMatrixWorld(true);
+      this.lantern.flame.getWorldPosition(this.worldLight.position);
+    }
   }
 
   private rapierPose(p: THREE.Vector3, q: THREE.Quaternion): void {

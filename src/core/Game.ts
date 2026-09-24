@@ -201,6 +201,7 @@ export class Game {
     this.guns = new Guns(this.boat);
     // what the sailor carries: pistol and rapier, drawn over everything
     this.pipeline.overlay = this.weapons.overlay;
+    this.scene.add(this.weapons.worldLight);
     this.musketry = new Musketry(this.deck, this.boat.root);
     this.scene.add(this.musketry.mesh);
     this.weapons.onPan = () => this.audio.pistol(0.085);
@@ -322,8 +323,8 @@ export class Game {
       }
     }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
-    // 1 pistol, 2 rapier (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
-    const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit0') ? 'spyglass' : null;
+    // 1 pistol, 2 rapier, 3 lantern (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
+    const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit3') ? 'lantern' : inp.wasPressed('Digit0') ? 'spyglass' : null;
     if (slot && !this.map.open) {
       if (!this.onDeck) this.setOnDeck(true);
       if (this.gunSight.active) this.gunSight.exit();

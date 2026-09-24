@@ -277,3 +277,72 @@ export function makeRapier(): Rapier {
   group.add(makeGrip(0.012, new THREE.Vector3(0, 0, 0.056), new THREE.Vector3(0, 0, -1), false, new THREE.Vector3(0.35, -0.85, -0.3)));
   return { group, base, tip };
 }
+
+export interface Lantern {
+  group: THREE.Group;
+  /** the part that swings (everything below the hand), pivoting on the bail */
+  body: THREE.Group;
+  flame: THREE.Mesh;
+  glass: THREE.MeshStandardMaterial;
+}
+
+/**
+ * A ship's hand lantern, held overhand by its bail: a brass cap with a chimney, a glass chimney-globe in a
+ * wire cage, a candle burning inside, a brass base. The bail's top is at the origin, running along X; the
+ * lantern hangs below it.
+ */
+export function makeLantern(): Lantern {
+  const group = new THREE.Group(), body = new THREE.Group();
+  group.add(body);
+  const add = (geo: THREE.BufferGeometry, mat: THREE.Material) => { const m = new THREE.Mesh(geo, mat); body.add(m); return m; };
+  // bail: a half ring up from the cap's sides to the hand
+  const bail = new THREE.TorusGeometry(0.036, 0.0032, 6, 18, Math.PI);
+  bail.translate(0, -0.036, 0);
+  add(bail, MATERIALS.iron);
+  // cap with a little chimney
+  const cap = new THREE.CylinderGeometry(0.022, 0.056, 0.045, 18, 1);
+  cap.translate(0, -0.06, 0);
+  add(cap, MATERIALS.brass);
+  const chim = new THREE.CylinderGeometry(0.012, 0.014, 0.022, 12);
+  chim.translate(0, -0.03, 0);
+  add(chim, MATERIALS.brass);
+  const rim = new THREE.TorusGeometry(0.052, 0.004, 6, 24);
+  rim.rotateX(Math.PI / 2);
+  rim.translate(0, -0.083, 0);
+  add(rim, MATERIALS.brass);
+  // the glass, lit from inside
+  // (clear, faintly amber glass: the candle shows through, the glass itself only glows a little)
+  const glass = new THREE.MeshStandardMaterial({ color: srgb(0.9, 0.8, 0.6), roughness: 0.05, metalness: 0, transparent: true, opacity: 0.22,
+    emissive: new THREE.Color(1, 0.55, 0.2), emissiveIntensity: 0.3, depthWrite: false });
+  const globe = new THREE.CylinderGeometry(0.046, 0.046, 0.12, 24, 1, true);
+  globe.translate(0, -0.145, 0);
+  add(globe, glass);
+  // cage: four wires and a mid band
+  for (let k = 0; k < 4; k++) {
+    const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+    const w = new THREE.CylinderGeometry(0.0022, 0.0022, 0.125, 5);
+    w.translate(Math.cos(a) * 0.05, -0.145, Math.sin(a) * 0.05);
+    add(w, MATERIALS.iron);
+  }
+  const band = new THREE.TorusGeometry(0.05, 0.0022, 5, 24);
+  band.rotateX(Math.PI / 2);
+  band.translate(0, -0.145, 0);
+  add(band, MATERIALS.iron);
+  // base
+  const base = new THREE.CylinderGeometry(0.055, 0.05, 0.022, 20);
+  base.translate(0, -0.215, 0);
+  add(base, MATERIALS.brass);
+  // the candle and its flame
+  const candle = new THREE.CylinderGeometry(0.011, 0.012, 0.05, 12);
+  candle.translate(0, -0.18, 0);
+  add(candle, new THREE.MeshStandardMaterial({ color: srgb(0.93, 0.88, 0.72), roughness: 0.7, emissive: new THREE.Color(0.5, 0.3, 0.1), emissiveIntensity: 0.6 }));
+  const fl = new THREE.SphereGeometry(0.008, 10, 8);
+  fl.scale(1, 2.2, 1);
+  fl.translate(0, 0.016, 0);
+  const flame = new THREE.Mesh(fl, new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 3.6, 1.2) }));
+  flame.position.set(0, -0.155, 0);
+  body.add(flame);
+  // held overhand: palm on top of the bail, fingers round its front, the arm back and down to the right
+  group.add(makeGrip(0.0034 + 0.009, new THREE.Vector3(0, 0, 0), new THREE.Vector3(-1, 0, 0), false, new THREE.Vector3(-0.35, -0.3, 1)));
+  return { group, body, flame, glass };
+}
