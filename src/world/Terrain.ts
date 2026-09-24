@@ -1,155 +1,201 @@
 import * as THREE from 'three';
-import { fbm, smoothstep, vnoise } from '../core/noise';
 import { patchUnderwater } from '../render/water/underwaterLight';
+import { boxIsOpenOcean, terrainHeight } from './WorldGen';
+import { tileIndex } from './tileGrid';
+import type { TileRequest, TileResult } from './terrain.worker';
 
 /**
- * Lagoon heightfield: islands, beaches, coral heads, a barrier reef and the ocean drop-off outside it.
- * Analytic (deterministic) so physics can query `heightAt` without reading back GPU data.
- * Heights are metres relative to mean water level (y = 0).
+ * Streamed terrain: the world (see WorldGen) is cut into TILE-sized square tiles around the camera, each
+ * built off the main thread by a small worker pool at a level of detail that drops with distance. Tiles
+ * with nothing but deep ocean are never built (decided from the feature layout alone), so open water
+ * costs nothing. A tile keeps showing its old mesh until the new level of detail arrives: no holes.
  */
-interface Island {
-  x: number;
-  z: number;
-  radius: number;
-  peak: number;
-  /** 0 = soft jungle hill, 1 = craggy rock */
-  rock: number;
-  /** elongation along a direction (sandbars) */
-  stretch?: [number, number, number];
-  /** height of the shoreline shelf above water (m) */
-  shore?: number;
-}
 
-const ISLANDS: Island[] = [
-  { x: -175, z: -130, radius: 95, peak: 38, rock: 0.35 },
-  { x: 195, z: -45, radius: 55, peak: 16, rock: 0.15 },
-  { x: 40, z: -240, radius: 17, peak: 9, rock: 1 },
-  { x: 95, z: 120, radius: 26, peak: 0.25, rock: 0, stretch: [0.8, 0.6, 2.4], shore: 0.35 },
-  { x: -70, z: 235, radius: 40, peak: 13, rock: 0.25 },
-  { x: -250, z: 120, radius: 12, peak: 6, rock: 0.9 },
+const TILE = 256;
+/** detail levels: segments per tile side, and the distance (m, camera → nearest point of the tile) it serves */
+const LODS = [
+  { n: 128, dist: 320 },
+  { n: 64, dist: 800 },
+  { n: 32, dist: 1600 },
+  { n: 16, dist: 3200 },
 ];
+/** a tile only drops to a coarser level (or unloads) this far past the threshold: no flicker on a boundary */
+const HYSTERESIS = 60;
+/** new meshes handed to the GPU per frame (spreads the buffer uploads) */
+const UPLOADS_PER_FRAME = 3;
 
-const REEF_RADIUS = 430;
-const LAGOON_FLOOR = -4.6;
-
-const smax = (a: number, b: number, k: number) => {
-  const h = Math.max(k - Math.abs(a - b), 0) / k;
-  return Math.max(a, b) + h * h * k * 0.25;
-};
-
-function islandHeight(isl: Island, x: number, z: number): number {
-  let dx = x - isl.x, dz = z - isl.z;
-  if (isl.stretch) {
-    const [cx, cz, s] = isl.stretch;
-    const a = dx * cx + dz * cz, b = -dx * cz + dz * cx;
-    dx = a / s;
-    dz = b;
-  }
-  // wobbly coastline
-  const wob = 1 + 0.42 * (fbm(x / 55 + isl.x, z / 55 + isl.z, 3) - 0.5);
-  const d = Math.hypot(dx, dz) / wob;
-  const R = isl.radius;
-  const shore = isl.shore ?? 1.1;
-  if (d < R) {
-    const r = d / R;
-    const dome = Math.pow(1 - r * r, 1.4);
-    const bumps = fbm(x / 22, z / 22, 4) - 0.5;
-    const crag = isl.rock * Math.abs(fbm(x / 9, z / 9, 3) - 0.5) * 2;
-    return shore + isl.peak * dome * (0.8 + 0.5 * bumps + 0.35 * crag);
-  }
-  // underwater shoulder: gentle beach shelf, then steeper
-  const o = d - R;
-  return shore - o * 0.1 - Math.max(0, o - 14) * 0.22 * (1 + isl.rock);
-}
-
-export function terrainHeight(x: number, z: number): number {
-  // lagoon floor: broad undulation + sand waves + scattered coral heads
-  let h = LAGOON_FLOOR + 1.4 * (fbm(x / 140, z / 140, 3) - 0.5) + 0.35 * (vnoise(x / 18, z / 18) - 0.5);
-  const coral = smoothstep(0.72, 0.9, fbm(x / 26 + 40, z / 26 - 13, 3));
-  h += coral * 3.1;
-
-  // keep the start area and a channel to the east open and navigable
-  const startClear = smoothstep(80, 25, Math.hypot(x, z));
-  h = h - startClear * Math.max(0, h + 3.2);
-
-  for (const isl of ISLANDS) h = smax(h, islandHeight(isl, x, z), 4);
-
-  // barrier reef ring (slightly elliptical), with a pass to the south-east
-  const rd = Math.hypot(x / 1.08, z * 1.0);
-  const ang = Math.atan2(z, x);
-  const pass = smoothstep(0.22, 0.08, Math.abs(ang - 0.62));
-  const crest = -0.35 + 0.8 * (fbm(x / 30, z / 30, 3) - 0.5) - pass * 5.5;
-  const reef = crest - Math.pow(Math.abs(rd - REEF_RADIUS) / 22, 2) * 3.2;
-  h = smax(h, reef, 3);
-  // ocean outside the reef
-  const outside = smoothstep(REEF_RADIUS + 10, REEF_RADIUS + 70, rd);
-  h = h * (1 - outside) + Math.min(h, -26 + 6 * fbm(x / 80, z / 80, 2)) * outside;
-  return h;
+interface Tile {
+  tx: number;
+  tz: number;
+  /** level currently shown (−1: none yet) */
+  lod: number;
+  mesh: THREE.Mesh | null;
+  /** level being built (−1: none) */
+  pending: number;
+  /** finest level at which the worker found only deep water (99: never) */
+  emptyAt: number;
 }
 
 export class Terrain {
-  readonly mesh: THREE.Mesh;
+  readonly group = new THREE.Group();
   readonly material: THREE.MeshStandardMaterial;
   private readonly pebbles: THREE.IUniform<THREE.Texture>;
+  private readonly tiles = new Map<string, Tile>();
+  private readonly open = new Map<string, boolean>();
+  private readonly index = LODS.map((l) => new THREE.BufferAttribute(tileIndex(l.n), 1));
+  private readonly workers: Worker[] = [];
+  private readonly busy: boolean[] = [];
+  private readonly queue: { tile: Tile; lod: number; d: number }[] = [];
+  private readonly jobs = new Map<number, { tile: Tile; lod: number; worker: number }>();
+  private readonly results: { job: { tile: Tile; lod: number }; r: TileResult }[] = [];
+  private nextId = 1;
 
-  constructor(size: number, segments: number, pebbles: THREE.Texture) {
+  constructor(pebbles: THREE.Texture, seed: number) {
     this.pebbles = { value: pebbles };
-    const geo = new THREE.PlaneGeometry(size, size, segments, segments);
-    geo.rotateX(-Math.PI / 2);
-    const pos = geo.attributes.position as THREE.BufferAttribute;
-    const col = new Float32Array(pos.count * 3);
-    const c = new THREE.Color();
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i);
-      const h = terrainHeight(x, z);
-      pos.setY(i, h);
-    }
-    geo.computeVertexNormals();
-    const nrm = geo.attributes.normal as THREE.BufferAttribute;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i), z = pos.getZ(i), h = pos.getY(i);
-      this.colorAt(x, z, h, nrm.getY(i), c);
-      col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
-    }
-    geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
     this.material.onBeforeCompile = (sh) => this.patchShader(sh);
-    this.mesh = new THREE.Mesh(geo, this.material);
-    this.mesh.receiveShadow = true;
-    this.mesh.name = 'terrain';
+    this.group.name = 'terrain';
+    const count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
+    for (let w = 0; w < count; w++) {
+      const worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
+      worker.postMessage({ seed });
+      worker.onmessage = (e: MessageEvent<TileResult>) => {
+        const job = this.jobs.get(e.data.id);
+        if (!job) return;
+        this.jobs.delete(e.data.id);
+        this.busy[job.worker] = false;
+        this.results.push({ job, r: e.data });
+      };
+      this.workers.push(worker);
+      this.busy.push(false);
+    }
   }
 
   heightAt(x: number, z: number): number {
     return terrainHeight(x, z);
   }
 
-  private colorAt(x: number, z: number, h: number, ny: number, out: THREE.Color): void {
-    const n1 = fbm(x / 12, z / 12, 3), n2 = vnoise(x / 3, z / 3);
-    const sand = new THREE.Color().setRGB(0.86, 0.77, 0.58, THREE.SRGBColorSpace);
-    const wetSand = new THREE.Color().setRGB(0.74, 0.65, 0.48, THREE.SRGBColorSpace);
-    const seabed = new THREE.Color().setRGB(0.8, 0.75, 0.6, THREE.SRGBColorSpace);
-    const weed = new THREE.Color().setRGB(0.3, 0.36, 0.2, THREE.SRGBColorSpace);
-    const coral = new THREE.Color().setRGB(0.62, 0.52, 0.47, THREE.SRGBColorSpace);
-    const grass = new THREE.Color().setRGB(0.24, 0.36, 0.12, THREE.SRGBColorSpace);
-    const jungle = new THREE.Color().setRGB(0.12, 0.22, 0.07, THREE.SRGBColorSpace);
-    const rock = new THREE.Color().setRGB(0.46, 0.43, 0.39, THREE.SRGBColorSpace);
+  /** tiles in flight or waiting (0 once everything around the camera is built) */
+  get backlog(): number {
+    return this.queue.length + this.jobs.size + this.results.length;
+  }
 
-    if (h < -0.4) {
-      out.copy(seabed).multiplyScalar(0.85 + 0.3 * n2);
-      const w = smoothstep(0.55, 0.75, fbm(x / 35 + 7, z / 35 - 3, 3)) * smoothstep(-1.5, -3.5, h);
-      out.lerp(weed, w * 0.85);
-      const cor = smoothstep(0.72, 0.9, fbm(x / 26 + 40, z / 26 - 13, 3));
-      out.lerp(coral.clone().offsetHSL(0.08 * (n1 - 0.5), 0.1 * n2, 0), cor * 0.9);
-      if (h < -8) out.lerp(new THREE.Color().setRGB(0.5, 0.52, 0.5, THREE.SRGBColorSpace), smoothstep(-8, -18, h));
-    } else if (h < 1.7) {
-      out.copy(wetSand).lerp(sand, smoothstep(0.1, 0.9, h)).multiplyScalar(0.92 + 0.16 * n2);
-    } else {
-      out.copy(grass).lerp(jungle, smoothstep(0.35, 0.7, n1)).multiplyScalar(0.8 + 0.4 * n2);
-      out.lerp(sand, smoothstep(2.4, 1.7, h));
+  get stats(): { tiles: number; meshes: number; vertices: number } {
+    let meshes = 0, vertices = 0;
+    for (const t of this.tiles.values()) if (t.mesh) { meshes++; vertices += (LODS[t.lod].n + 1) ** 2; }
+    return { tiles: this.tiles.size, meshes, vertices };
+  }
+
+  /** build everything around `focus` before the game starts */
+  async ready(focus: THREE.Vector3, progress?: (f: number) => void): Promise<void> {
+    this.update(focus, Infinity);
+    const total = Math.max(1, this.backlog);
+    while (this.backlog > 0) {
+      await new Promise((r) => setTimeout(r, 16));
+      this.update(focus, Infinity);
+      progress?.(1 - this.backlog / total);
     }
-    const steep = smoothstep(0.82, 0.6, ny) * smoothstep(-0.2, 0.8, h);
-    out.lerp(rock.clone().multiplyScalar(0.8 + 0.4 * n1), steep);
+  }
+
+  /** once per frame: decide which tiles are needed at which detail, dispatch work, adopt finished tiles */
+  update(focus: THREE.Vector3, uploads = UPLOADS_PER_FRAME): void {
+    this.plan(focus);
+    this.dispatch();
+    for (let k = 0; k < uploads && this.results.length; k++) this.adopt(this.results.shift()!);
+  }
+
+  private isOpenOcean(tx: number, tz: number): boolean {
+    const key = `${tx},${tz}`;
+    let v = this.open.get(key);
+    if (v === undefined) {
+      v = boxIsOpenOcean(tx * TILE, tz * TILE, (tx + 1) * TILE, (tz + 1) * TILE);
+      if (this.open.size > 20000) this.open.clear();
+      this.open.set(key, v);
+    }
+    return v;
+  }
+
+  private plan(focus: THREE.Vector3): void {
+    const far = LODS[LODS.length - 1].dist;
+    const r = Math.ceil((far + HYSTERESIS) / TILE);
+    const ctx = Math.floor(focus.x / TILE), ctz = Math.floor(focus.z / TILE);
+    const seen = new Set<string>();
+    this.queue.length = 0;
+    for (let tz = ctz - r; tz <= ctz + r; tz++)
+      for (let tx = ctx - r; tx <= ctx + r; tx++) {
+        if (this.isOpenOcean(tx, tz)) continue;
+        // distance from the focus to the nearest point of the tile
+        const dx = Math.max(tx * TILE - focus.x, 0, focus.x - (tx + 1) * TILE);
+        const dz = Math.max(tz * TILE - focus.z, 0, focus.z - (tz + 1) * TILE);
+        const d = Math.hypot(dx, dz);
+        const key = `${tx},${tz}`;
+        let tile = this.tiles.get(key);
+        let want = LODS.findIndex((l) => d < l.dist);
+        if (want < 0) {
+          // past the last level: a loaded tile survives the hysteresis band, otherwise it is unloaded below
+          if (tile && d < far + HYSTERESIS) seen.add(key);
+          continue;
+        }
+        // coarsen only past the hysteresis band
+        if (tile && tile.lod >= 0 && want > tile.lod && d < LODS[tile.lod].dist + HYSTERESIS) want = tile.lod;
+        if (!tile) { tile = { tx, tz, lod: -1, mesh: null, pending: -1, emptyAt: 99 }; this.tiles.set(key, tile); }
+        seen.add(key);
+        if (want === tile.lod || want === tile.pending || want >= tile.emptyAt) continue;
+        this.queue.push({ tile, lod: want, d });
+      }
+    for (const [key, t] of this.tiles) if (!seen.has(key)) this.drop(key, t);
+    // nearest first; a tile with nothing to show yet beats a refinement
+    this.queue.sort((a, b) => (a.tile.lod < 0 ? 0 : 1) - (b.tile.lod < 0 ? 0 : 1) || a.d - b.d);
+  }
+
+  private dispatch(): void {
+    let q = 0;
+    for (let w = 0; w < this.workers.length && q < this.queue.length; w++) {
+      if (this.busy[w]) continue;
+      const { tile, lod } = this.queue[q++];
+      const id = this.nextId++;
+      const n = LODS[lod].n, step = TILE / n;
+      this.busy[w] = true;
+      tile.pending = lod;
+      this.jobs.set(id, { tile, lod, worker: w });
+      this.workers[w].postMessage({ id, x0: tile.tx * TILE, z0: tile.tz * TILE, size: TILE, n, skirt: 1.5 + step * 0.75 } satisfies TileRequest);
+    }
+    this.queue.splice(0, q);
+  }
+
+  private adopt({ job, r }: { job: { tile: Tile; lod: number }; r: TileResult }): void {
+    const t = job.tile;
+    if (t.pending === job.lod) t.pending = -1;
+    if (this.tiles.get(`${t.tx},${t.tz}`) !== t) return; // unloaded meanwhile
+    if (r.empty) {
+      t.emptyAt = Math.min(t.emptyAt, job.lod);
+      if (t.mesh) { this.group.remove(t.mesh); t.mesh.geometry.dispose(); t.mesh = null; }
+      t.lod = job.lod;
+      return;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(r.position!, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(r.normal!, 3));
+    g.setAttribute('color', new THREE.BufferAttribute(r.color!, 3));
+    g.setIndex(this.index[job.lod]);
+    g.boundingBox = new THREE.Box3(new THREE.Vector3(0, r.minY - 20, 0), new THREE.Vector3(TILE, r.maxY, TILE));
+    g.boundingSphere = g.boundingBox.getBoundingSphere(new THREE.Sphere());
+    const mesh = new THREE.Mesh(g, this.material);
+    mesh.position.set(t.tx * TILE, 0, t.tz * TILE);
+    mesh.updateMatrix();
+    mesh.matrixAutoUpdate = false;
+    mesh.receiveShadow = true;
+    mesh.name = `tile ${t.tx},${t.tz} n${LODS[job.lod].n}`;
+    if (t.mesh) { this.group.remove(t.mesh); t.mesh.geometry.dispose(); }
+    this.group.add(mesh);
+    t.mesh = mesh;
+    t.lod = job.lod;
+    t.emptyAt = 99;
+  }
+
+  private drop(key: string, t: Tile): void {
+    if (t.mesh) { this.group.remove(t.mesh); t.mesh.geometry.dispose(); }
+    this.tiles.delete(key);
   }
 
   private patchShader(sh: THREE.WebGLProgramParametersWithUniforms): void {

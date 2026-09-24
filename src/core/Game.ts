@@ -18,6 +18,7 @@ import { Weather } from '../environment/Weather';
 import { WeatherFX } from '../environment/WeatherFX';
 import { BANDS, Clouds, cloudShadowUniforms } from '../environment/Clouds';
 import { Terrain } from '../world/Terrain';
+import { ChannelMarkers } from '../world/ChannelMarkers';
 import { Vegetation } from '../world/Vegetation';
 import { Mission } from '../gameplay/Mission';
 import { Boat } from '../boat/Boat';
@@ -56,6 +57,7 @@ export class Game {
   terrain!: Terrain;
   vegetation!: Vegetation;
   mission!: Mission;
+  readonly markers = new ChannelMarkers();
   physics!: BoatPhysics;
   readonly cam: SailingCamera;
   readonly debug: DebugUI;
@@ -140,18 +142,20 @@ export class Game {
     pebbles.anisotropy = 8;
     progress(0.1);
 
-    this.terrain = new Terrain(Config.world.size, 600, pebbles);
-    this.scene.add(this.terrain.mesh);
+    this.terrain = new Terrain(pebbles, Config.worldSeed);
+    this.scene.add(this.terrain.group);
+    const start = Config.freeCam ? new THREE.Vector3(Config.freeCam[0], 0, Config.freeCam[2]) : new THREE.Vector3();
+    await this.terrain.ready(start, (f) => progress(0.1 + 0.2 * f));
     this.vegetation = new Vegetation((x, z) => this.terrain.heightAt(x, z), Config.world.size / 2 - 10);
     this.scene.add(this.vegetation.group);
-    progress(0.25);
+    progress(0.3);
 
-    await this.boat.load('assets/boats/amadis.glb', (f) => progress(0.25 + 0.7 * f));
+    await this.boat.load('assets/boats/amadis.glb', (f) => progress(0.3 + 0.65 * f));
     this.scene.add(this.boat.root);
     this.physics = new BoatPhysics(this.boat.info, this.waves, this.wind, (x, z) => this.terrain.heightAt(x, z));
     this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, Config.startSpeed);
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
-    this.scene.add(this.mission.group);
+    this.scene.add(this.mission.group, this.markers.group);
     progress(1);
 
     this.resize();
@@ -241,6 +245,7 @@ export class Game {
     body.applyVisuals(this.boat, t);
     this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t);
     this.mission.update(stepDt, t, body.origin, this.waves);
+    this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
 
     // --- camera ---
     const focus = body.origin.clone();
@@ -252,6 +257,7 @@ export class Game {
       this.cam.update(dt, this.input, focus, body.heading, (x, z) => this.terrain.heightAt(x, z));
     }
     this.cam.camera.updateMatrixWorld();
+    this.terrain.update(this.cam.camera.position);
 
     // --- water simulation ---
     const u = this.water.uniforms;
@@ -318,7 +324,7 @@ export class Game {
       this.boat.root.quaternion.identity();
       this.boat.sail.forEach((m) => (m.visible = true));
       this.scene.background = new THREE.Color(0xdddddd);
-      this.terrain.mesh.visible = false;
+      this.terrain.group.visible = false;
       this.env.sky.visible = false;
       this.scene.fog = null;
     }

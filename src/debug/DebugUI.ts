@@ -25,6 +25,7 @@ export class DebugUI {
       `draw ${info.render.calls}  tris ${(info.render.triangles / 1000).toFixed(0)}k`,
       `FFT ${Config.fft.N}² @ ${Config.fft.L} m   ripples ${Config.ripples.N}² @ ${Config.ripples.size} m`,
       `caustics ${Config.caustics.size}² (grid ${Config.caustics.grid})   plants ${g.vegetation.count}`,
+      `terrain ${g.terrain.stats.meshes}/${g.terrain.stats.tiles} tiles  ${(g.terrain.stats.vertices / 1000).toFixed(0)}k verts  queue ${g.terrain.backlog}   pos ${p.origin.x.toFixed(0)}, ${p.origin.z.toFixed(0)}`,
       `view  ${g.view}   [F2 final F3 normals F4 caustics F5 refl F6 depth F7 ripples F8 fft]`,
       ``,
       `wind  ${g.wind.speed.toFixed(1)} m/s from ${((g.wind.from * 180) / Math.PI).toFixed(0)}°`,

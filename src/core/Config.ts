@@ -9,6 +9,7 @@
 //   ?moon=0.5         moon phase (0 new … 0.5 full);  ?pause  start with the clock stopped
 //   ?sun=35,200       pin the sun: elevation, azimuth (degrees) — overrides the day cycle
 //   ?speed=4          start the boat moving (m/s), for wake checks
+//   ?seed=7           procedural world beyond the home lagoon (default 1337)
 import { parseTime } from '../environment/GameTime';
 import { parseWeather } from '../environment/Weather';
 
@@ -25,6 +26,8 @@ export const Config = {
   view: Q.get('view') ?? 'final',
   freeCam: vec('cam'),
   startSpeed: num('speed') ?? 3,
+  /** ?seed=7 procedural ocean around the home lagoon */
+  worldSeed: num('seed') ?? 1337,
   initialQuality: num('q'),
   adaptiveQuality: !Q.has('t') && !Q.has('noadapt'),
 
@@ -66,6 +69,7 @@ export const Config = {
   },
 
   world: {
+    /** extent of the hand-made home lagoon (vegetation is placed within it) */
     size: 900,
   },
 } as const;
