@@ -83,7 +83,8 @@ export class Mission {
     this.say(`Opłyń ${this.marks.length} boi i wróć na start`, 8);
   }
 
-  private say(text: string, seconds: number): void {
+  /** show a transient message on the HUD */
+  say(text: string, seconds: number): void {
     this.message = text;
     this.messageT = seconds;
   }

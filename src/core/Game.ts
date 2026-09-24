@@ -24,6 +24,8 @@ import { MapUI } from '../map/MapUI';
 import { DeckMap } from '../boat/DeckMap';
 import { FishLife } from '../life/Fish';
 import { Gulls } from '../life/Gulls';
+import { Dolphins } from '../life/Dolphins';
+import { Splash } from '../life/Splash';
 import { DeckWalker } from '../camera/DeckWalker';
 import { LENS_R, Spyglass } from '../camera/Spyglass';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
@@ -71,6 +73,10 @@ export class Game {
   readonly markers = new ChannelMarkers();
   readonly fish = new FishLife();
   readonly gulls = new Gulls();
+  readonly dolphins = new Dolphins();
+  readonly splash = new Splash();
+  /** F9: all the animals (fish, gulls, dolphins, their spray and calls) — off to save frame time */
+  fauna = (() => { try { return localStorage.getItem('lagoon.fauna') !== 'off'; } catch { return true; } })();
   readonly discovery = new Discovery(Config.worldSeed);
   map!: MapUI;
   physics!: BoatPhysics;
@@ -184,6 +190,25 @@ export class Game {
     this.mission = new Mission((x, z) => this.terrain.heightAt(x, z));
     this.scene.add(this.mission.group, this.markers.group, this.fish.mesh, this.gulls.mesh);
     this.gulls.onCall = (pan, d) => this.audio.gull(pan, d);
+    this.scene.add(this.dolphins.mesh, this.splash.points);
+    if (!this.fauna) this.setFauna(false, true);
+    // where a sound comes from relative to the camera: pan −1…1 and distance
+    const heard = (x: number, z: number) => {
+      const cam = this.cam.camera, r = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
+      const dx = x - cam.position.x, dz = z - cam.position.z, d = Math.hypot(dx, dz) || 1;
+      return { pan: (dx * r.x + dz * r.z) / d, d };
+    };
+    this.dolphins.onSplash = (x, y, z, power, vx, vz) => {
+      this.splash.burst(x, y, z, Math.round(10 + power * 7), power, { x: vx, z: vz });
+      this.ripples.disturb(x, z, 0.9 + power * 0.2, 0.05 + power * 0.035);
+      const h = heard(x, z);
+      this.audio.splash(h.pan, h.d, power);
+    };
+    this.dolphins.onBlow = (x, z) => {
+      this.splash.burst(x, 0.3, z, 8, 1.6);
+      const h = heard(x, z);
+      this.audio.blow(h.pan, h.d);
+    };
     this.map = new MapUI(this.discovery, Config.worldSeed);
     progress(1);
 
@@ -224,6 +249,7 @@ export class Game {
     if (inp.wasPressed('KeyH')) this.hud.toggleHelp();
     if (inp.wasPressed('KeyV') && !this.onDeck) this.cam.toggleDive();
     if (inp.wasPressed('KeyF')) this.setOnDeck(!this.onDeck);
+    if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
     // L: the spyglass (from the chase camera it first takes you on deck)
     if (inp.wasPressed('KeyL')) { if (!this.onDeck) this.setOnDeck(true); this.spyglass.toggle(); }
     if (inp.wasPressed('KeyN')) this.weather.cycle();
@@ -286,14 +312,20 @@ export class Game {
     this.boat.setLantern(Math.max(this.env.night, this.weather.p.overcast > 0.85 ? 0.4 : 0), t);
     this.mission.update(stepDt, t, body.origin, this.waves);
     this.markers.update(t, this.cam.camera.position, this.waves, this.env.night);
-    this.fish.update(stepDt, body.origin, body.origin, 1 - this.env.night);
-    {
+    if (this.fauna) {
+      this.fish.update(stepDt, body.origin, body.origin, 1 - this.env.night);
       // gulls: a follower trails ~16 m astern; they keep away at night and in rain or heavy weather
       const o = body.origin, h = body.heading;
       const stern = new THREE.Vector3(o.x - Math.sin(h) * 16, 0, o.z - Math.cos(h) * 16);
       const ok = this.env.night < 0.3 && wp.rain < 0.15 && wp.wind < 13;
       const cam = this.cam.camera, right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
       this.gulls.update(stepDt, t, o, stern, body.speed, ok, this.waves, cam.position, right);
+      const bow = new THREE.Vector3(o.x + Math.sin(h) * this.boat.info.hullBow, 0, o.z + Math.cos(h) * this.boat.info.hullBow);
+      this.dolphins.update(stepDt, t, o, bow, h, body.speed, wp.wind < 13 && this.env.night < 0.6, this.waves);
+      // spray is white water: lit like the foam
+      const sun = this.env.sunRadiance, sky = this.env.skyIrradiance;
+      const light = new THREE.Vector3(sun.x * 0.3 + sky.x * 0.6, sun.y * 0.3 + sky.y * 0.6, sun.z * 0.3 + sky.z * 0.6);
+      this.splash.update(stepDt, light, this.pipeline.height, cam.fov);
     }
     this.discovery.update(dt, body.origin.x, body.origin.z);
     this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading });
@@ -392,6 +424,14 @@ export class Game {
     this.renderer.setRenderTarget(null);
     this.renderer.autoClear = true;
     this.renderer.render(this.scene, this.inspectCam);
+  }
+
+  /** F9: animals on / off; remembered between sessions */
+  setFauna(on: boolean, quiet = false): void {
+    this.fauna = on;
+    for (const o of [this.fish.mesh, this.gulls.mesh, this.dolphins.mesh, this.splash.points]) o.visible = on;
+    try { localStorage.setItem('lagoon.fauna', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
+    if (!quiet) this.mission.say(on ? 'Fauna włączona (F9)' : 'Fauna wyłączona (F9)', 2.5);
   }
 
   /** switch between the chase camera and walking the deck */

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { patchUnderwater } from '../render/water/underwaterLight';
 import { terrainHeight } from '../world/WorldGen';
 
@@ -45,8 +46,8 @@ function fishGeometry(): THREE.BufferGeometry {
   pos.push(0, 0, tz + 0.02, 0, 0.16, tz - 0.2, 0, 0.02, tz - 0.12);
   pos.push(0, 0, tz + 0.02, 0, -0.02, tz - 0.12, 0, -0.16, tz - 0.2);
   pos.push(0, 0.14, 0.2, 0, 0.13, -0.22, 0, 0.23, -0.12);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  // shared vertices → smooth normals on the body
+  const g = mergeVertices(new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)), 1e-4);
   g.computeVertexNormals();
   return g;
 }

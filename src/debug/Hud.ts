@@ -23,7 +23,7 @@ export class Hud {
       '&nbsp;&nbsp;&nbsp;&nbsp;luneta: prawy przycisk myszy (przytrzymaj) lub <kbd>L</kbd>, kółko: przybliżenie &nbsp; <kbd>X</kbd> żagle',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
-      '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>H</kbd> ukryj',
+      '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>F9</kbd> fauna wł./wył. &nbsp; <kbd>H</kbd> ukryj',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',
     ].join('<br>');
     setTimeout(() => this.help.classList.add('fade'), 12000);
