@@ -20,7 +20,7 @@ export class Hud {
       '<kbd>T</kbd> auto-trym &nbsp; <kbd>Spacja</kbd> zwiń / postaw żagle',
       'mysz: obrót kamery, kółko: zoom &nbsp; <kbd>V</kbd> pod wodę &nbsp; <kbd>R</kbd> reset',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
-      '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc)',
+      '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
       '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F8</kbd> widoki wody &nbsp; <kbd>H</kbd> ukryj',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',
     ].join('<br>');
@@ -56,7 +56,7 @@ export class Hud {
     this.el.innerHTML =
       svg +
       row('czas', `${g.clock.label}${g.clock.paused ? ' ⏸' : ''} · ${g.weather.name}${g.weather.auto ? '' : ' 🔒'}`) +
-      row('prędkość', `${(p.speed * 1.943844).toFixed(1)} kn`) +
+      row('prędkość', `${(p.speed * 1.943844).toFixed(1)} kn${p.travel > 1 ? ` <b class="travel">×${String(p.travel).replace('.', ',')}</b>` : ''}`) +
       row('kurs', `${deg(p.bearing).toFixed(0).padStart(3, '0')}°`) +
       row('wiatr', `${(g.wind.speed * 1.943844).toFixed(0)} kn · ${Math.abs(deg(p.twa)).toFixed(0)}°`) +
       row('kurs wzgl. wiatru', p.pointOfSail) +

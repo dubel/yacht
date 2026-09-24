@@ -68,10 +68,6 @@ export const Config = {
     speed: 1.5,
   },
 
-  world: {
-    /** extent of the hand-made home lagoon (vegetation is placed within it) */
-    size: 900,
-  },
 } as const;
 
 export type ViewMode = 'final' | 'normals' | 'caustics' | 'reflection' | 'depth' | 'ripples' | 'fft';

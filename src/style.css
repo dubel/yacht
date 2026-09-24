@@ -19,6 +19,7 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
 #hud .row { display: flex; justify-content: space-between; gap: 16px; }
 #hud .k { opacity: 0.6; }
 #hud .compass { display: block; margin: 0 auto 6px; }
+#hud .travel { color: #ffd27a; font-weight: 600; }
 
 #help { position: fixed; left: 14px; bottom: 14px; font: 12px/1.6 var(--sans); color: var(--ink);
   background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);

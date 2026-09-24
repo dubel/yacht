@@ -206,6 +206,13 @@ export class BoatPhysics {
     return this.v2.copy(this.com).negate().applyQuaternion(this.quaternion).add(this.position);
   }
 
+  /**
+   * Fast travel (the − / + keys): the boat covers `travel` times the ground it sails. The dynamics — heel,
+   * waves, sail forces — run at normal speed; each step just carries the hull further along its course.
+   * Off while aground, so it never drives the keel into a beach.
+   */
+  travel = 1;
+
   update(dt: number, t: number, input: Input): void {
     this.controls(dt, input);
     this.acc += dt;
@@ -213,6 +220,10 @@ export class BoatPhysics {
     while (this.acc >= DT && steps < 8) {
       this.acc -= DT;
       this.step(DT, t - this.acc);
+      if (this.travel > 1 && !this.grounded) {
+        this.position.x += this.velocity.x * (this.travel - 1) * DT;
+        this.position.z += this.velocity.z * (this.travel - 1) * DT;
+      }
       steps++;
     }
     if (steps === 8) this.acc = 0;

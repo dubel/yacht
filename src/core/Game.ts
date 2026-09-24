@@ -32,6 +32,8 @@ import { AudioSystem } from '../audio/AudioSystem';
 
 /** how much faster than real time the clouds move while the day clock runs (a 7-min day is ~200× faster) */
 const CLOUD_TIMELAPSE = 6;
+/** fast-travel multipliers (− / +) */
+const TRAVEL = [1, 1.5, 2, 4, 6];
 
 const START_BEARING = THREE.MathUtils.degToRad(190);
 const VIEW_IDS: Record<ViewMode, number> = { final: 0, normals: 1, caustics: 2, reflection: 3, depth: 4, ripples: 5, fft: 6 };
@@ -146,12 +148,11 @@ export class Game {
     pebbles.anisotropy = 8;
     progress(0.1);
 
-    this.terrain = new Terrain(pebbles, Config.worldSeed);
+    this.vegetation = new Vegetation();
+    this.terrain = new Terrain(pebbles, Config.worldSeed, this.vegetation);
     this.scene.add(this.terrain.group);
     const start = Config.freeCam ? new THREE.Vector3(Config.freeCam[0], 0, Config.freeCam[2]) : new THREE.Vector3();
     await this.terrain.ready(start, (f) => progress(0.1 + 0.2 * f));
-    this.vegetation = new Vegetation((x, z) => this.terrain.heightAt(x, z), Config.world.size / 2 - 10);
-    this.scene.add(this.vegetation.group);
     progress(0.3);
 
     await this.boat.load('assets/boats/amadis.glb', (f) => progress(0.3 + 0.65 * f));
@@ -202,6 +203,10 @@ export class Game {
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
     if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
+    // fast travel: − / + step through the multipliers
+    const k = TRAVEL.indexOf(this.physics.travel);
+    if (inp.wasPressed('Minus') || inp.wasPressed('NumpadSubtract')) this.physics.travel = TRAVEL[Math.max(0, k - 1)];
+    if (inp.wasPressed('Equal') || inp.wasPressed('NumpadAdd')) this.physics.travel = TRAVEL[Math.min(TRAVEL.length - 1, k + 1)];
     if (inp.wasPressed('Tab')) this.map.toggle();
     if (inp.wasPressed('Escape')) this.map.close();
     if (inp.wasPressed('KeyC') && this.map.open) this.map.center();

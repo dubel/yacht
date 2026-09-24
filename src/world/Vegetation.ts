@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { fbm, mulberry32, smoothstep } from '../core/noise';
+import { fbm, mulberry32 } from '../core/noise';
 import { CLOUD_SHADOW_GLSL, cloudShadowUniforms } from '../environment/Clouds';
 
 /*
@@ -26,7 +26,7 @@ function colored(g: THREE.BufferGeometry, fn: (p: THREE.Vector3, c: THREE.Color)
 
 const srgb = (r: number, g: number, b: number) => new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace);
 
-function palmGeometry(rnd: () => number): THREE.BufferGeometry {
+function palmGeometry(rnd: () => number, low = false): THREE.BufferGeometry {
   const H = 7.5;
   const curve = new THREE.CatmullRomCurve3([
     new THREE.Vector3(0, 0, 0),
@@ -35,16 +35,16 @@ function palmGeometry(rnd: () => number): THREE.BufferGeometry {
     new THREE.Vector3(1.9, H, 0),
   ]);
   const bark = srgb(0.46, 0.4, 0.32), barkDark = srgb(0.3, 0.26, 0.2);
-  const trunk = colored(new THREE.TubeGeometry(curve, 10, 0.17, 6, false), (p, c) => {
+  const trunk = colored(new THREE.TubeGeometry(curve, low ? 3 : 10, low ? 0.2 : 0.17, low ? 4 : 6, false), (p, c) => {
     c.copy(bark).lerp(barkDark, 0.5 + 0.5 * Math.sin(p.y * 9));
   });
   const top = curve.getPoint(1);
   const parts: THREE.BufferGeometry[] = [trunk];
   const leafA = srgb(0.22, 0.42, 0.12), leafB = srgb(0.45, 0.55, 0.2);
-  const fronds = 10;
+  const fronds = low ? 6 : 10;
   for (let i = 0; i < fronds; i++) {
-    const L = 3.4 + rnd() * 1.0, W = 0.8;
-    const seg = 7;
+    const L = 3.4 + rnd() * 1.0, W = low ? 1.0 : 0.8;
+    const seg = low ? 2 : 7;
     const verts: number[] = [];
     const cols: number[] = [];
     const ang = (i / fronds) * Math.PI * 2 + rnd() * 0.4;
@@ -73,25 +73,26 @@ function palmGeometry(rnd: () => number): THREE.BufferGeometry {
   }
   // coconuts
   const nut = colored(new THREE.IcosahedronGeometry(0.22, 0), (_p, c) => c.copy(srgb(0.33, 0.3, 0.15)));
-  for (let i = 0; i < 3; i++) parts.push(nut.clone().translate(top.x + Math.cos(i * 2.1) * 0.25, top.y - 0.3, top.z + Math.sin(i * 2.1) * 0.25));
+  if (!low) for (let i = 0; i < 3; i++) parts.push(nut.clone().translate(top.x + Math.cos(i * 2.1) * 0.25, top.y - 0.3, top.z + Math.sin(i * 2.1) * 0.25));
   for (const p of parts) if (!p.attributes.normal) p.computeVertexNormals();
   return mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)))!;
 }
 
-function blobTree(rnd: () => number, trunkH: number, crown: number, dark: THREE.Color, light: THREE.Color): THREE.BufferGeometry {
+function blobTree(rnd: () => number, trunkH: number, crown: number, dark: THREE.Color, light: THREE.Color, low = false): THREE.BufferGeometry {
   const parts: THREE.BufferGeometry[] = [];
-  if (trunkH > 0) parts.push(colored(new THREE.CylinderGeometry(0.16, 0.26, trunkH, 6).translate(0, trunkH / 2, 0), (_p, c) => c.copy(srgb(0.33, 0.26, 0.18))));
-  const blobs = 5;
+  if (trunkH > 0) parts.push(colored(new THREE.CylinderGeometry(0.16, 0.26, trunkH, low ? 4 : 6, 1, low).translate(0, trunkH / 2, 0), (_p, c) => c.copy(srgb(0.33, 0.26, 0.18))));
+  const blobs = low ? 2 : 5;
   for (let i = 0; i < blobs; i++) {
-    const r = crown * (0.55 + rnd() * 0.35);
-    const g = new THREE.IcosahedronGeometry(r, 1);
+    // (the low version: two bigger, coarser blobs cover the same crown)
+    const r = crown * (0.55 + rnd() * 0.35) * (low ? 1.3 : 1);
+    const g = new THREE.IcosahedronGeometry(r, low ? 0 : 1);
     const pos = g.attributes.position as THREE.BufferAttribute;
     for (let k = 0; k < pos.count; k++) {
       const f = 1 + 0.18 * (fbm(pos.getX(k) * 1.7 + i * 3, pos.getY(k) * 1.7 + pos.getZ(k), 2) - 0.5) * 2;
       pos.setXYZ(k, pos.getX(k) * f, pos.getY(k) * f * 0.85, pos.getZ(k) * f);
     }
     const a = (i / blobs) * Math.PI * 2;
-    const off = i === 0 ? 0 : crown * 0.55;
+    const off = i === 0 ? 0 : crown * (low ? 0.35 : 0.55);
     g.translate(Math.cos(a) * off, trunkH + crown * (i === 0 ? 0.9 : 0.55 + rnd() * 0.3), Math.sin(a) * off);
     g.computeVertexNormals();
     parts.push(colored(g, (p, c) => c.copy(dark).lerp(light, THREE.MathUtils.clamp((p.y - trunkH) / (crown * 2), 0, 1) * 0.8 + 0.2 * rnd())));
@@ -99,12 +100,18 @@ function blobTree(rnd: () => number, trunkH: number, crown: number, dark: THREE.
   return mergeGeometries(parts.map((p) => (p.index ? p.toNonIndexed() : p)))!;
 }
 
+/**
+ * Plant models and their wind-swayed material. Placement is done per terrain tile in the worker
+ * (vegetationPlacement.ts) and the Terrain streamer makes the instanced meshes: full models close by,
+ * low-poly ones further out (`geometry(kind, low)`).
+ */
 export class Vegetation {
-  readonly group = new THREE.Group();
   readonly uniforms = { uTime: { value: 0 }, uWind: { value: new THREE.Vector3(1, 0, 0) } };
+  readonly material: THREE.MeshStandardMaterial;
+  /** [kind][0 = full, 1 = low] */
+  private readonly geos: THREE.BufferGeometry[][];
 
-  constructor(heightAt: (x: number, z: number) => number, extent: number) {
-    const rnd = mulberry32(42);
+  constructor() {
     const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, side: THREE.DoubleSide });
     material.onBeforeCompile = (sh) => {
       Object.assign(sh.uniforms, this.uniforms, cloudShadowUniforms);
@@ -133,54 +140,23 @@ gl_Position = projectionMatrix * mvPosition;`,
         );
     };
 
-    const kinds = [
-      { geo: palmGeometry(rnd), place: (h: number, ny: number, n: number) => h > 1.4 && h < 7 && ny > 0.8 && n > 0.35 ? 0.55 : 0, scale: [0.75, 1.25] },
-      { geo: blobTree(rnd, 3.2, 2.4, srgb(0.1, 0.2, 0.06), srgb(0.28, 0.42, 0.14)), place: (h: number, ny: number, n: number) => h > 3.5 && ny > 0.62 ? smoothstep(0.35, 0.6, n) * 0.85 : 0, scale: [0.8, 1.5] },
-      { geo: blobTree(rnd, 0, 1.1, srgb(0.16, 0.24, 0.08), srgb(0.36, 0.44, 0.16)), place: (h: number, ny: number, n: number) => h > 1.9 && ny > 0.6 ? 0.25 + 0.3 * n : 0, scale: [0.6, 1.3] },
-    ];
-    const step = 4.2;
-    const buckets: THREE.Matrix4[][] = kinds.map(() => []);
-    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-    for (let x = -extent; x < extent; x += step)
-      for (let z = -extent; z < extent; z += step) {
-        const px = x + (rnd() - 0.5) * step, pz = z + (rnd() - 0.5) * step;
-        const h = heightAt(px, pz);
-        if (h < 1.3) continue;
-        const e = 0.8;
-        const nx = heightAt(px - e, pz) - heightAt(px + e, pz), nz = heightAt(px, pz - e) - heightAt(px, pz + e);
-        const ny = (2 * e) / Math.hypot(nx, 2 * e, nz);
-        const n = fbm(px / 30, pz / 30, 3);
-        const r = rnd();
-        let acc = 0;
-        for (let k = 0; k < kinds.length; k++) {
-          acc += kinds[k].place(h, ny, n);
-          if (r < acc * 0.6) {
-            const [s0, s1] = kinds[k].scale;
-            const sc = s0 + (s1 - s0) * rnd();
-            q.setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.12, rnd() * Math.PI * 2, (rnd() - 0.5) * 0.12));
-            s.setScalar(sc);
-            p.set(px, h - 0.15, pz);
-            buckets[k].push(m.compose(p, q, s).clone());
-            break;
-          }
-        }
-      }
-    kinds.forEach((k, i) => {
-      const list = buckets[i];
-      if (!list.length) return;
-      const mesh = new THREE.InstancedMesh(k.geo, material, list.length);
-      list.forEach((mm, j) => mesh.setMatrixAt(j, mm));
-      mesh.instanceMatrix.needsUpdate = true;
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.computeBoundingSphere();
-      this.group.add(mesh);
-    });
-    this.group.name = 'vegetation';
+    this.material = material;
+    // the same seeds for both levels, so a far tree and its close-up look alike
+    const tree = [srgb(0.1, 0.2, 0.06), srgb(0.28, 0.42, 0.14)] as const, bush = [srgb(0.16, 0.24, 0.08), srgb(0.36, 0.44, 0.16)] as const;
+    this.geos = [false, true].map((low) => [
+      palmGeometry(mulberry32(42), low),
+      blobTree(mulberry32(43), 3.2, 2.4, tree[0], tree[1], low),
+      blobTree(mulberry32(44), 0, 1.1, bush[0], bush[1], low),
+    ]);
   }
 
-  get count(): number {
-    return this.group.children.reduce((a, c) => a + (c as THREE.InstancedMesh).count, 0);
+  geometry(kind: number, low: boolean): THREE.BufferGeometry {
+    return this.geos[low ? 1 : 0][kind];
+  }
+
+  /** triangles per plant, [kind][full, low] (debug) */
+  get triangles(): number[][] {
+    return [0, 1, 2].map((k) => [0, 1].map((l) => this.geos[l][k].attributes.position.count / 3));
   }
 
   update(t: number, windX: number, windZ: number, speed: number): void {

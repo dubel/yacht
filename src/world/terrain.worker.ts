@@ -1,5 +1,6 @@
 import { INVISIBLE_DEPTH, setWorldSeed, terrainColor, terrainHeight } from './WorldGen';
 import { perimeter } from './tileGrid';
+import { placeVegetation, VEG_MIN_H } from './vegetationPlacement';
 
 /*
  * Terrain tile builder, off the main thread. For a square tile it samples the world heightfield on an
@@ -16,6 +17,8 @@ export interface TileRequest {
   /** segments per side */
   n: number;
   skirt: number;
+  /** also place the plants (once per tile, when it first comes within tree range) */
+  veg?: boolean;
 }
 
 export interface TileResult {
@@ -26,6 +29,8 @@ export interface TileResult {
   position?: Float32Array;
   normal?: Float32Array;
   color?: Float32Array;
+  /** per plant kind: instance matrices (16 floats each), when requested */
+  veg?: Float32Array[];
 }
 
 // (typed by hand: the "webworker" lib would replace the DOM types for the whole project)
@@ -37,7 +42,7 @@ const ctx = self as unknown as {
 ctx.onmessage = (e) => {
   const m = e.data;
   if ('seed' in m) { setWorldSeed(m.seed); return; }
-  const { id, x0, z0, size, n, skirt } = m;
+  const { id, x0, z0, size, n, skirt, veg } = m;
   const step = size / n, W = n + 3;
   // heights with a 1-sample ring: H[(j+1)*W + (i+1)] is grid vertex (i, j)
   const H = new Float32Array(W * W);
@@ -71,5 +76,7 @@ ctx.onmessage = (e) => {
     for (let a = 0; a < 3; a++) { position[dst * 3 + a] = position[src * 3 + a]; normal[dst * 3 + a] = normal[src * 3 + a]; color[dst * 3 + a] = color[src * 3 + a]; }
     position[dst * 3 + 1] -= skirt;
   }
-  ctx.postMessage({ id, empty: false, minY, maxY, position, normal, color } satisfies TileResult, [position.buffer, normal.buffer, color.buffer]);
+  const plants = veg ? (maxY >= VEG_MIN_H ? placeVegetation(x0, z0, size) : []) : undefined;
+  ctx.postMessage({ id, empty: false, minY, maxY, position, normal, color, veg: plants } satisfies TileResult,
+    [position.buffer, normal.buffer, color.buffer, ...(plants ?? []).map((a) => a.buffer)]);
 };

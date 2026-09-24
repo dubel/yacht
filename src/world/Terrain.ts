@@ -3,6 +3,7 @@ import { patchUnderwater } from '../render/water/underwaterLight';
 import { boxIsOpenOcean, terrainHeight } from './WorldGen';
 import { tileIndex } from './tileGrid';
 import type { TileRequest, TileResult } from './terrain.worker';
+import type { Vegetation } from './Vegetation';
 
 /**
  * Streamed terrain: the world (see WorldGen) is cut into TILE-sized square tiles around the camera, each
@@ -21,6 +22,11 @@ const LODS = [
 ];
 /** a tile only drops to a coarser level (or unloads) this far past the threshold: no flicker on a boundary */
 const HYSTERESIS = 60;
+/** tiles at this level or finer carry plants (low-poly models) */
+const VEG_LOD = 2;
+/** full plant models only on tiles this close (m, nearest point; in / out with hysteresis) — they cost
+ *  ~5× the triangles, and beyond this no one can tell */
+const VEG_FULL_IN = 110, VEG_FULL_OUT = 150;
 /** new meshes handed to the GPU per frame (spreads the buffer uploads) */
 const UPLOADS_PER_FRAME = 3;
 
@@ -34,6 +40,11 @@ interface Tile {
   pending: number;
   /** finest level at which the worker found only deep water (99: never) */
   emptyAt: number;
+  /** plants on this tile, one instanced mesh per kind (null: not placed yet) */
+  plants: THREE.InstancedMesh[] | null;
+  plantsAsked: boolean;
+  /** close enough for the full plant models */
+  near: boolean;
 }
 
 export class Terrain {
@@ -50,11 +61,15 @@ export class Terrain {
   private readonly results: { job: { tile: Tile; lod: number }; r: TileResult }[] = [];
   private nextId = 1;
 
-  constructor(pebbles: THREE.Texture, seed: number) {
+  private readonly plants = new THREE.Group();
+
+  constructor(pebbles: THREE.Texture, seed: number, private readonly vegetation: Vegetation) {
     this.pebbles = { value: pebbles };
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
     this.material.onBeforeCompile = (sh) => this.patchShader(sh);
     this.group.name = 'terrain';
+    this.plants.name = 'vegetation';
+    this.group.add(this.plants);
     const count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
     for (let w = 0; w < count; w++) {
       const worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
@@ -80,10 +95,13 @@ export class Terrain {
     return this.queue.length + this.jobs.size + this.results.length;
   }
 
-  get stats(): { tiles: number; meshes: number; vertices: number } {
-    let meshes = 0, vertices = 0;
-    for (const t of this.tiles.values()) if (t.mesh) { meshes++; vertices += (LODS[t.lod].n + 1) ** 2; }
-    return { tiles: this.tiles.size, meshes, vertices };
+  get stats(): { tiles: number; meshes: number; vertices: number; plants: number; plantsNear: number } {
+    let meshes = 0, vertices = 0, plants = 0, plantsNear = 0;
+    for (const t of this.tiles.values()) {
+      if (t.mesh) { meshes++; vertices += (LODS[t.lod].n + 1) ** 2; }
+      for (const m of t.plants ?? []) if (m.visible) { plants += m.count; if (t.near) plantsNear += m.count; }
+    }
+    return { tiles: this.tiles.size, meshes, vertices, plants, plantsNear };
   }
 
   /** build everything around `focus` before the game starts */
@@ -138,8 +156,10 @@ export class Terrain {
         }
         // coarsen only past the hysteresis band
         if (tile && tile.lod >= 0 && want > tile.lod && d < LODS[tile.lod].dist + HYSTERESIS) want = tile.lod;
-        if (!tile) { tile = { tx, tz, lod: -1, mesh: null, pending: -1, emptyAt: 99 }; this.tiles.set(key, tile); }
+        if (!tile) { tile = { tx, tz, lod: -1, mesh: null, pending: -1, emptyAt: 99, plants: null, plantsAsked: false, near: false }; this.tiles.set(key, tile); }
         seen.add(key);
+        const near = d < (tile.near ? VEG_FULL_OUT : VEG_FULL_IN);
+        if (near !== tile.near) { tile.near = near; this.plantDetail(tile); }
         if (want === tile.lod || want === tile.pending || want >= tile.emptyAt) continue;
         this.queue.push({ tile, lod: want, d });
       }
@@ -157,8 +177,10 @@ export class Terrain {
       const n = LODS[lod].n, step = TILE / n;
       this.busy[w] = true;
       tile.pending = lod;
+      const veg = !tile.plantsAsked && lod <= VEG_LOD;
+      if (veg) tile.plantsAsked = true;
       this.jobs.set(id, { tile, lod, worker: w });
-      this.workers[w].postMessage({ id, x0: tile.tx * TILE, z0: tile.tz * TILE, size: TILE, n, skirt: 1.5 + step * 0.75 } satisfies TileRequest);
+      this.workers[w].postMessage({ id, x0: tile.tx * TILE, z0: tile.tz * TILE, size: TILE, n, skirt: 1.5 + step * 0.75, veg } satisfies TileRequest);
     }
     this.queue.splice(0, q);
   }
@@ -167,6 +189,7 @@ export class Terrain {
     const t = job.tile;
     if (t.pending === job.lod) t.pending = -1;
     if (this.tiles.get(`${t.tx},${t.tz}`) !== t) return; // unloaded meanwhile
+    if (r.veg) this.addPlants(t, r.veg);
     if (r.empty) {
       t.emptyAt = Math.min(t.emptyAt, job.lod);
       if (t.mesh) { this.group.remove(t.mesh); t.mesh.geometry.dispose(); t.mesh = null; }
@@ -191,10 +214,39 @@ export class Terrain {
     t.mesh = mesh;
     t.lod = job.lod;
     t.emptyAt = 99;
+    this.plantDetail(t);
+  }
+
+  private addPlants(t: Tile, veg: Float32Array[]): void {
+    t.plants = [];
+    veg.forEach((m, kind) => {
+      const count = m.length / 16;
+      if (!count) return;
+      const mesh = new THREE.InstancedMesh(this.vegetation.geometry(kind, true), this.vegetation.material, count);
+      mesh.instanceMatrix = new THREE.InstancedBufferAttribute(m, 16);
+      mesh.userData.kind = kind;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      // bounds from the instance positions (+ the tallest plant), so whole tiles of trees are culled
+      mesh.computeBoundingSphere();
+      mesh.boundingSphere!.radius += 12;
+      mesh.matrixAutoUpdate = false;
+      t.plants!.push(mesh);
+      this.plants.add(mesh);
+    });
+  }
+
+  /** full plant models on the nearest tiles, low-poly ones further out, none past VEG_LOD */
+  private plantDetail(t: Tile): void {
+    for (const m of t.plants ?? []) {
+      m.visible = t.lod >= 0 && t.lod <= VEG_LOD;
+      m.geometry = this.vegetation.geometry(m.userData.kind as number, !t.near);
+    }
   }
 
   private drop(key: string, t: Tile): void {
     if (t.mesh) { this.group.remove(t.mesh); t.mesh.geometry.dispose(); }
+    for (const m of t.plants ?? []) { this.plants.remove(m); m.dispose(); }
     this.tiles.delete(key);
   }
 
