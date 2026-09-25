@@ -287,6 +287,12 @@ export class Game {
       say: (text, sec) => this.messages.say(text, sec),
       hurt: (k) => this.hurt(k),
       gold: (n) => this.inventory.setDucats(this.inventory.ducats + n),
+      voice: (kind, at, echo) => {
+        const h = this.heardFrom(at.x, at.z);
+        this.audio.growl(kind, h.pan, h.d, echo);
+        // (near, the music steps aside for it)
+        if (kind !== 'grunt' && h.d < 18) this.music.duckFor(kind === 'roar' ? 0.6 : 0.4, kind === 'roar' ? 3 : 2);
+      },
       sound: (kind, at) => {
         const h = this.heardFrom(at.x, at.z);
         if (kind === 'swing') this.audio.swoosh(h.pan * 0.5);

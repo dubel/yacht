@@ -37,7 +37,14 @@ export interface ThunderEvent {
 
 const LOOPS = ['ocean', 'lapping', 'rain-light', 'rain-heavy', 'crickets', 'creak-loop'] as const;
 const SHOTS = ['thunder-1', 'thunder-2', 'thunder-3', 'thunder-4', 'thunder-5', 'gull-1', 'gull-2', 'gull-3', 'creak-1',
-  'splash-big', 'splash-1', 'splash-2', 'splash-3'] as const;
+  'splash-big', 'splash-1', 'splash-2', 'splash-3',
+  'skel-roar-1', 'skel-roar-2', 'skel-roar-3', 'skel-rasp-1', 'skel-rasp-2', 'skel-rasp-3', 'skel-rasp-5', 'skel-grunt-1', 'skel-grunt-2', 'skel-grunt-3'] as const;
+/** a skeleton's voices (recorded: monster growls and a zombie's moan — see public/assets/audio/CREDITS.md) */
+const SKEL: Record<'roar' | 'rasp' | 'grunt', ShotName[]> = {
+  roar: ['skel-roar-1', 'skel-roar-2', 'skel-roar-3'],
+  rasp: ['skel-rasp-1', 'skel-rasp-2', 'skel-rasp-3', 'skel-rasp-5'],
+  grunt: ['skel-grunt-1', 'skel-grunt-2', 'skel-grunt-3'],
+};
 type LoopName = (typeof LOOPS)[number];
 type ShotName = (typeof SHOTS)[number];
 
@@ -433,6 +440,40 @@ export class AudioSystem {
       }
       this.knock(t, 5000, 1.5, 0.05, 0.01, 0);
     }
+  }
+
+  /**
+   * A skeleton's voice: a roar as it rises, a rasping breath as it runs at him, a grunt with each cut — one
+   * of a few recordings, played a little slower and deeper than life and a little different each time,
+   * placed and dulled by distance like any sound. `echo`: in the cave, it comes back off the rock.
+   */
+  growl(kind: 'roar' | 'rasp' | 'grunt', pan: number, distance: number, echo: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const near = Math.min(1, 7 / (distance + 2.5));
+    if (near < 0.04) return;
+    const list = SKEL[kind], name = list[Math.floor(Math.random() * list.length)];
+    const buf = this.buffers.get(name);
+    if (!buf) return;
+    const t = ctx.currentTime + 0.01;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = (kind === 'grunt' ? 0.92 : 0.8) + Math.random() * 0.14;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 1500 + 9000 * near;
+    const g = ctx.createGain();
+    g.gain.value = (kind === 'grunt' ? 0.85 : 1) * near;
+    const pn = ctx.createStereoPanner();
+    pn.pan.value = pan * 0.8;
+    src.connect(lp).connect(g).connect(pn).connect(this.muffle);
+    if (echo) {
+      // the cave: a couple of quick echoes off the rock, darker each time
+      const d = ctx.createDelay(1), fb = ctx.createGain(), dl = ctx.createBiquadFilter(), wet = ctx.createGain();
+      d.delayTime.value = 0.11 + Math.random() * 0.05; fb.gain.value = 0.35; dl.type = 'lowpass'; dl.frequency.value = 1600; wet.gain.value = 0.55;
+      pn.connect(d).connect(dl).connect(fb).connect(d);
+      dl.connect(wet).connect(this.muffle);
+    }
+    src.start(t);
   }
 
   /** the sailor cut: a dull blow, and his breath knocked out */

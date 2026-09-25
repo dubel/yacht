@@ -62,6 +62,8 @@ interface Guard {
   cut: number;
   /** his heading (rad), turned toward the sailor at a man's pace */
   yaw: number;
+  /** till his next rasping breath as he runs (s) */
+  growlT: number;
   /** out of the passage, chasing him across the island: where he is (world x, z); null in the passage */
   free: THREE.Vector2 | null;
   mats: THREE.MeshStandardMaterial[];
@@ -84,6 +86,8 @@ export interface SkullHooks {
   hurt(amount: number): void;
   gold(n: number): void;
   sound(kind: 'boneHit' | 'collapse' | 'swing' | 'rise' | 'coins', at: THREE.Vector3): void;
+  /** a guard's voice (`echo`: in the cave) */
+  voice(kind: 'roar' | 'rasp' | 'grunt', at: THREE.Vector3, echo: boolean): void;
 }
 
 export class SkullIsland {
@@ -460,7 +464,7 @@ export class SkullIsland {
       model.traverse((o) => { if ((o as THREE.Bone).isBone) { if (o.name.startsWith('R_shoulder')) arm = o as THREE.Bone; if (o.name.startsWith('R_forarm')) fore = o as THREE.Bone; if (o.name.startsWith('HandleBone')) hand = o as THREE.Bone; } });
       root.visible = false;
       this.group.add(root);
-      this.guards.push({ root, mixer, run, arm, mats, fore, hand, blade: hand ? bladeAxis(model, hand) : null, cut: 0, yaw: 0, free: null, state: 'waiting', s: spots[n], lat: 0, hp: GUARD_HP, t: 0, cool: 1, swing: 0, struck: false, flash: 0, spawnS: spots[n] });
+      this.guards.push({ root, mixer, run, arm, mats, fore, hand, blade: hand ? bladeAxis(model, hand) : null, cut: 0, yaw: 0, free: null, growlT: 0, state: 'waiting', s: spots[n], lat: 0, hp: GUARD_HP, t: 0, cool: 1, swing: 0, struck: false, flash: 0, spawnS: spots[n] });
     }
   }
 
@@ -548,7 +552,7 @@ export class SkullIsland {
         rise = 1 - Math.min(1, g.t / 1.3);
         g.run.timeScale = 0;
         g.run.time = STANCE;
-        if (g.t > 1.3) g.state = 'chasing';
+        if (g.t > 1.3) { g.state = 'chasing'; g.growlT = 0.7 + Math.random() * 0.6; this.hooks.voice('roar', g.root.position, !g.free); }
       } else if (g.state === 'chasing') {
         g.cool -= dt;
         let moving = false;
@@ -557,7 +561,15 @@ export class SkullIsland {
         const phase = g.run.time % RUN_CYCLE;
         g.run.timeScale = moving || Math.abs(phase - STANCE) > 0.04 ? 1.1 : 0;
         const d = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
-        if (g.swing === 0 && g.cool <= 0 && d < REACH) { g.swing = 0.001; g.struck = false; g.cut = 1 - g.cut; this.hooks.sound('swing', g.root.position); }
+        // running at him and near: a rasping breath now and then
+        g.growlT -= dt;
+        if (moving && d < 16 && g.growlT <= 0) { g.growlT = 2 + Math.random() * 2.2; this.hooks.voice('rasp', g.root.position, !g.free); }
+        if (g.swing === 0 && g.cool <= 0 && d < REACH) {
+          g.swing = 0.001; g.struck = false; g.cut = 1 - g.cut;
+          this.hooks.sound('swing', g.root.position);
+          this.hooks.voice('grunt', g.root.position, !g.free);
+          g.growlT = Math.max(g.growlT, 1.2);
+        }
         if (g.swing > 0) {
           g.swing = this.debugSwing ?? g.swing + dt / 0.85;
           // the blow lands as the blade comes down through the middle of the cut, if he is still in reach

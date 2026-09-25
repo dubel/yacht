@@ -35,6 +35,10 @@ export class Music {
   private pendingT = 0;
   /** silence left before the next piece */
   private wait = 3;
+  /** ducked under a loud moment (a skeleton's roar): how far down (0–1) and for how long still */
+  private duckK = 0;
+  private duckT = 0;
+  private duck = 1;
 
   constructor(private readonly base = 'assets/music/') {}
 
@@ -47,17 +51,26 @@ export class Music {
     return this.enabled;
   }
 
+  /** step aside for a moment: the music `k` quieter (0–1) for `seconds`, easing down and back up */
+  duckFor(k: number, seconds: number): void {
+    this.duckK = Math.max(this.duckK, k);
+    this.duckT = Math.max(this.duckT, seconds);
+  }
+
   get now(): string {
     return this.playing ? `${MUSIC_NAMES[this.playing.mood]}: ${this.playing.el.src.split('/').pop()}` : this.mood ? `(cisza, ${MUSIC_NAMES[this.mood]})` : '—';
   }
 
   /** once per frame; `ready`: sound is running (after the first gesture); `muted`: M */
   update(dt: number, want: Mood, ready: boolean, muted: boolean): void {
+    this.duckT = Math.max(0, this.duckT - dt);
+    if (this.duckT === 0) this.duckK = 0;
+    this.duck += (1 - this.duckK - this.duck) * Math.min(1, dt * (this.duckK > 0 ? 8 : 1.5));
     // fades
     for (let i = this.fading.length - 1; i >= 0; i--) {
       const f = this.fading[i];
       f.vol = Math.max(0, f.vol - dt / 3);
-      f.el.volume = muted ? 0 : f.vol * LEVEL[f.mood];
+      f.el.volume = muted ? 0 : f.vol * LEVEL[f.mood] * this.duck;
       if (f.vol <= 0) { f.el.pause(); f.el.src = ''; this.fading.splice(i, 1); }
     }
     if (!ready || !this.enabled) return;
@@ -79,7 +92,7 @@ export class Music {
     const p = this.playing;
     if (p) {
       p.vol = Math.min(1, p.vol + dt / 2.5);
-      p.el.volume = muted ? 0 : p.vol * LEVEL[p.mood];
+      p.el.volume = muted ? 0 : p.vol * LEVEL[p.mood] * this.duck;
       if (p.el.ended) {
         this.playing = null;
         const [a, b] = GAP[mood];

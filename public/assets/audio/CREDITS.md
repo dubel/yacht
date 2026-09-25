@@ -20,3 +20,6 @@ Wind, rigging whistle, sail flogging and hull water rush are synthesised in code
 | crickets.mp3 | [Field cricket unedited.ogg](https://commons.wikimedia.org/wiki/File:Field_cricket_unedited.ogg) | Thatcher | CC BY-SA 3.0 |
 | splash-big.mp3 (trimmed, gain) | [Jump into Water (Gravity Sound).mp3](https://commons.wikimedia.org/wiki/File:Jump_into_Water_(Gravity_Sound).mp3) | Gravity Sound | CC BY 4.0 |
 | splash-1..3.mp3 (excerpts) | [Bathtub water splashes.ogg](https://commons.wikimedia.org/wiki/File:Bathtub_water_splashes.ogg) | gradha | Public domain |
+| skel-roar-1, skel-roar-3, skel-rasp-1..3, skel-grunt-1..2 (excerpts, normalised) | [Monster growls.ogg](https://commons.wikimedia.org/wiki/File:Monster_growls.ogg) | stilgar | Public domain |
+| skel-roar-2 (normalised) | [Zombie moan.ogg](https://commons.wikimedia.org/wiki/File:Zombie_moan.ogg) | gregoryweir | Public domain |
+| skel-rasp-5, skel-grunt-3 (excerpts, denoised, normalised) | [Zombie-Gutteral-Sounds.ogg](https://commons.wikimedia.org/wiki/File:Zombie-Gutteral-Sounds.ogg) | Wowsuchthings | CC BY-SA 4.0 |
