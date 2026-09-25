@@ -30,6 +30,9 @@ export class Status {
   private leanV = 0;
   private stir = 0;
   private readonly bubbles: { x: number; y: number; r: number; v: number }[] = [];
+  /** the coin's frame on show, and the time since the tube was last drawn (it is drawn ~30 times a second) */
+  private coinFrame = -1;
+  private tubeT = 0;
 
   constructor(private readonly inv: Inventory) {
     this.el.id = 'status';
@@ -63,8 +66,9 @@ export class Status {
   update(dt: number, heel: number, bob: number): void {
     this.t += dt;
     // ---- the purse: the coin turns, the figure runs to the count ----
-    if (this.strip) {
-      const k = Math.floor(((this.t * 0.45) % 1) * this.frames);
+    const k = Math.floor(((this.t * 0.45) % 1) * this.frames);
+    if (this.strip && k !== this.coinFrame) {
+      this.coinFrame = k;
       const ctx = this.coin.getContext('2d')!, s = this.coin.width;
       ctx.clearRect(0, 0, s, s);
       ctx.drawImage(this.strip, k * this.strip.height, 0, this.strip.height, this.strip.height, 0, 0, s, s);
@@ -86,7 +90,8 @@ export class Status {
     this.leanV += ((heel * 0.9 - this.lean) * 30 - this.leanV * 5) * dt;
     this.lean += this.leanV * dt;
     this.stir += (Math.min(1, bob + Math.abs(this.leanV) * 0.6) - this.stir) * Math.min(1, dt * 2);
-    this.drawTube(dt);
+    this.tubeT += dt;
+    if (this.tubeT >= 1 / 30 && !this.el.hidden) { this.drawTube(this.tubeT); this.tubeT = 0; }
   }
 
   private drawTube(dt: number): void {
