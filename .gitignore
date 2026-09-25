@@ -6,3 +6,5 @@ dist/
 assets/swedish_royal_yacht_amadis.glb
 # source jolly boat model (12.7 MB) — the game uses public/assets/boats/jollyboat.glb (npm run optimize-jollyboat)
 assets/wooden_boat.glb
+# source FPS hands model (11 MB) — the game uses public/assets/fpv/hands.glb (npm run optimize-hands)
+assets/hands_model_rigged.glb

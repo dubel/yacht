@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { Input } from '../core/Input';
 import { makeLantern, makePistol, makeRapier, type Lantern, type Pistol, type Rapier } from './models';
+import { Hands, type Grasp } from './Hands';
 
 /*
  * What the sailor holds on deck: 1 the flintlock pistol, 2 the rapier, 3 a lantern (the spyglass, 0, is its
@@ -36,6 +37,16 @@ const CUTS: [Pose, Pose][] = [
   [pose(0.42, 0.06, -0.3, 1.25, -0.75, 0.9), pose(-0.1, -0.36, -0.36, -0.55, 0.85, 0.9)],
 ];
 
+/** how the hand closes on each piece (see Hands) */
+export const GRASP: Record<Exclude<Weapon, 'none'>, Grasp> = {
+  // the index finger along the trigger, the rest round the butt
+  pistol: { index: [0.3, 0.4, 0.5], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-0.5, 0.3, 0.3], thumbAcross: 0.2, radius: 0.0155 },
+  // the fingers round the wire-bound grip inside the knuckle bow, the thumb along it toward the guard
+  rapier: { index: [0.9, 1, 0.8], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-0.5, 0.3, 0.3], thumbAcross: 0.2, radius: 0.012 },
+  // overhand on the bail: the fingers hooked round the wire
+  lantern: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.005 },
+};
+
 export class Weapons {
   /** drawn last, over everything (see Pipeline.overlay) */
   readonly overlay = new THREE.Scene();
@@ -50,6 +61,8 @@ export class Weapons {
   onReady: (() => void) | null = null;
 
   private readonly root = new THREE.Group();
+  /** the arm and hand that hold them */
+  readonly hands = new Hands();
   private readonly pistol: Pistol;
   private readonly rapier: Rapier;
   private readonly lantern: Lantern;
@@ -87,6 +100,7 @@ export class Weapons {
     this.lantern.flame.add(this.handLight);
     this.root.add(this.pistol.group, this.rapier.group, this.lantern.group);
     this.lantern.group.visible = false;
+    this.root.add(this.hands.root);
     this.overlay.add(this.root, this.light, this.light.target);
     this.pistol.group.visible = this.rapier.group.visible = false;
 
@@ -127,6 +141,11 @@ export class Weapons {
     this.slots.hidden = true;
     this.slots.innerHTML = '<span data-w="pistol"><kbd>1</kbd> pistolet</span><span data-w="rapier"><kbd>2</kbd> rapier</span><span data-w="lantern"><kbd>3</kbd> latarnia</span><span data-w="spyglass"><kbd>0</kbd> luneta</span>';
     document.body.append(this.dot, this.slots);
+  }
+
+  /** the arm and hand model (they are drawn only once it has loaded) */
+  async loadHands(url: string): Promise<void> {
+    await this.hands.load(url);
   }
 
   /** anything in hand (Ctrl then belongs to it, not to manning a gun) */
@@ -251,6 +270,9 @@ export class Weapons {
     // ---- the overlay follows the camera; its light is the sun's ----
     this.root.position.copy(camera.position);
     this.root.quaternion.copy(camera.quaternion);
+    // the hand on the grip of what is held, the arm after it
+    this.root.updateMatrixWorld(true);
+    this.hands.update(this.held === 'none' ? null : this.gripOf(this.held), this.held === 'none' ? null : GRASP[this.held]);
     this.light.position.copy(camera.position).add(sunDir);
     this.light.target.position.copy(camera.position);
     this.light.color.copy(sunColor);
@@ -268,6 +290,10 @@ export class Weapons {
     this.dot.classList.toggle('loading', this.reload > 0);
     this.slots.hidden = false;
     for (const el of this.slots.children) (el as HTMLElement).classList.toggle('on', (el as HTMLElement).dataset.w === this.weapon);
+  }
+
+  private gripOf(w: Exclude<Weapon, 'none'>): THREE.Object3D {
+    return w === 'pistol' ? this.pistol.grip : w === 'rapier' ? this.rapier.grip : this.lantern.grip;
   }
 
   /** the slots bar also shows the spyglass slot as active */

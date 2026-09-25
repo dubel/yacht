@@ -224,6 +224,7 @@ export class Game {
     this.guns = new Guns(this.boat);
     // what the sailor carries: pistol and rapier, drawn over everything
     this.pipeline.overlay = this.weapons.overlay;
+    await this.weapons.loadHands('assets/fpv/hands.glb');
     this.scene.add(this.weapons.worldLight);
     this.musketry = new Musketry(this.deck, this.boat.root);
     this.scene.add(this.musketry.mesh);
