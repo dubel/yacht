@@ -1,119 +1,199 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 /*
- * First-person models, built from primitives: a flintlock pistol, a swept-hilt rapier and a hand lantern.
- * Sizes are real (metres), so they sit right in the view at arm's length. The arm and hand that hold them
- * are a model of their own (Hands), put on each piece's grip frame.
+ * First-person pieces, from models (optimised copies in assets/fpv, npm run optimize-weapons; all CC-BY-4.0,
+ * see the README): "Flintlock Colonial Pistol" by inciprocal, "Revolver" by barmatunishka, "Spanish Rapier"
+ * by Lathander, "Metal hanging lantern" by Irina.Tuchna and "Skull lantern" by brendan wood. Each is scaled to real size and set in the frame the poses and animations
+ * of Weapons expect: pointing along −Z with its top up, the way the camera looks. The arm and hand that hold
+ * them are a model of their own (Hands), put on each piece's grip frame.
  *
- * Conventions: a grip frame has the grip along its local +Y (little finger → index), the palm on the +X
- * side, the fingers wrapping round the front (−Z). Weapons point along −Z with the top up, the way the
- * camera looks.
+ * A grip frame has the grip along its local +Y (little finger → index), the palm on the +X side, the
+ * fingers wrapping round the front (−Z).
+ *
+ * The parts that move are re-hung on hinges: the flintlock's cock (cut out of its single mesh) and the
+ * revolver's hammer (they fall, and are drawn back), the revolver's cylinder (it turns a chamber as the
+ * hammer comes back); a lantern's body swings under the hand. The points
+ * below (hinges, grips, the flame) were measured on the models, in their own units and axes.
  */
 
-const srgb = (r: number, g: number, b: number) => new THREE.Color().setRGB(r, g, b, THREE.SRGBColorSpace);
+const loader = new GLTFLoader();
+loader.setMeshoptDecoder(MeshoptDecoder);
 
-export const MATERIALS = {
-  walnut: new THREE.MeshStandardMaterial({ color: srgb(0.26, 0.13, 0.06), roughness: 0.62 }),
-  brass: new THREE.MeshStandardMaterial({ color: srgb(0.85, 0.66, 0.3), roughness: 0.32, metalness: 1 }),
-  iron: new THREE.MeshStandardMaterial({ color: srgb(0.22, 0.22, 0.23), roughness: 0.42, metalness: 1 }),
-  blade: new THREE.MeshStandardMaterial({ color: srgb(0.72, 0.72, 0.72), roughness: 0.3, metalness: 1, envMapIntensity: 0.7 }),
-  wire: new THREE.MeshStandardMaterial({ color: srgb(0.42, 0.36, 0.28), roughness: 0.35, metalness: 0.9 }),
-};
+async function load(name: string): Promise<THREE.Group> {
+  const scene = (await loader.loadAsync(`assets/fpv/${name}.glb`)).scene;
+  scene.updateMatrixWorld(true);
+  return scene;
+}
 
-/** the grip frame of a piece (see the conventions above): at `gripAt`, its +Y along `gripAxis` (weapon frame) */
-function gripFrame(gripAt: THREE.Vector3, gripAxis: THREE.Vector3): THREE.Object3D {
+/** a rotation that takes the model's `fwd` to −Z and (as near as it can) its `up` to +Y */
+function facing(fwd: THREE.Vector3, up: THREE.Vector3): THREE.Quaternion {
+  const f = fwd.clone().normalize();
+  const u = up.clone().addScaledVector(f, -up.dot(f)).normalize();
+  const r = new THREE.Vector3().crossVectors(f, u);
+  // (the basis maps the target axes into the model; its inverse maps the model onto them)
+  return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(r, u, f.negate())).invert();
+}
+
+/**
+ * The model in a group of its own: scaled by `s`, turned by `q`, with its point `at` (model units) put at
+ * `to` (metres, the group's frame). Returns the group and a function mapping model points into it.
+ */
+function place(model: THREE.Object3D, s: number, q: THREE.Quaternion, at: THREE.Vector3, to = new THREE.Vector3()) {
+  const inner = new THREE.Group();
+  inner.add(model);
+  inner.scale.setScalar(s);
+  inner.quaternion.copy(q);
+  inner.position.copy(to).sub(at.clone().multiplyScalar(s).applyQuaternion(q));
+  const group = new THREE.Group();
+  group.add(inner);
+  inner.updateMatrix();
+  const toGroup = (p: THREE.Vector3) => p.clone().applyMatrix4(inner.matrix);
+  return { group, toGroup };
+}
+
+/**
+ * Re-hang part `name` of a loaded model on a hinge at `pivot` turning about `axis` (both in the model's
+ * space, as loaded): returns a setter for the hinge's angle.
+ */
+function hinge(model: THREE.Object3D, name: string, pivot: THREE.Vector3, axis: THREE.Vector3): (angle: number) => void {
+  const part = model.getObjectByName(name);
+  if (!part?.parent) throw new Error(`models: no part ${name}`);
+  model.updateMatrixWorld(true);
+  const parent = part.parent, h = new THREE.Group();
+  parent.add(h);
+  h.position.copy(parent.worldToLocal(pivot.clone()));
+  h.updateMatrixWorld(true);
+  h.attach(part);
+  const local = axis.clone().normalize().applyQuaternion(parent.getWorldQuaternion(new THREE.Quaternion()).invert());
+  return (angle) => h.quaternion.setFromAxisAngle(local, angle);
+}
+
+/**
+ * Cut a part out of a single-mesh model: the triangles of `mesh` lying wholly inside `boxes` (model space, the
+ * model as loaded) move to a new mesh named `name`, beside it and sharing its attributes and material — so
+ * it can be hung on a hinge of its own. Returns the number of triangles moved.
+ */
+export function splitPart(mesh: THREE.Mesh, boxes: THREE.Box3[], name: string): number {
+  const g = mesh.geometry, pos = g.getAttribute('position');
+  mesh.updateWorldMatrix(true, false);
+  const inside: boolean[] = [];
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld); inside.push(boxes.some((b) => b.containsPoint(v))); }
+  const idx = g.index ? Array.from(g.index.array) : [...Array(pos.count).keys()];
+  const keep: number[] = [], move: number[] = [];
+  for (let t = 0; t < idx.length; t += 3) {
+    const tri = [idx[t], idx[t + 1], idx[t + 2]];
+    (tri.every((k) => inside[k]) ? move : keep).push(...tri);
+  }
+  if (!move.length) return 0;
+  g.setIndex(keep);
+  const part = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(g.attributes)) part.setAttribute(k, a);
+  part.setIndex(move);
+  const m = new THREE.Mesh(part, mesh.material);
+  m.name = name;
+  m.position.copy(mesh.position); m.quaternion.copy(mesh.quaternion); m.scale.copy(mesh.scale);
+  mesh.parent!.add(m);
+  return move.length / 3;
+}
+
+/** a grip frame at `at` with its +Y along `axis` (the piece's frame), its +X (the palm) toward `palm` if given */
+function gripFrame(at: THREE.Vector3, axis: THREE.Vector3, palm?: THREE.Vector3): THREE.Object3D {
   const g = new THREE.Object3D();
-  g.position.copy(gripAt);
-  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), gripAxis.clone().normalize());
+  g.position.copy(at);
+  const y = axis.clone().normalize();
+  if (palm) {
+    const x = palm.clone().addScaledVector(y, -palm.dot(y)).normalize();
+    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, new THREE.Vector3().crossVectors(x, y)));
+  } else g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), y);
   return g;
+}
+
+/** lit in the overlay: a little of the sky, not a mirror of it; never culled (it is always in view) */
+function tame(model: THREE.Object3D): void {
+  model.traverse((o) => {
+    const m = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (m?.isMeshStandardMaterial) m.envMapIntensity = 0.7;
+    o.frustumCulled = false;
+  });
 }
 
 export interface Pistol {
   group: THREE.Group;
-  /** muzzle and priming pan, in the pistol's frame */
+  /** the muzzle, in the pistol's frame (−Z out of the bore) */
   muzzle: THREE.Object3D;
-  pan: THREE.Object3D;
-  cock: THREE.Object3D;
-  /** the grip frame (see the conventions above): where the hand holds it */
   grip: THREE.Object3D;
+  /** the hammer: 0 down (fired) … 1 drawn back (cocked) */
+  setHammer(k: number): void;
+  /** the cylinder turned by `angle` (rad) from its first chamber */
+  setCylinder(angle: number): void;
+  /** chambers in the cylinder */
+  chambers: number;
+  /** hammer fall → shot (s): a flintlock's pan flashes first, a percussion cap goes off at once */
+  hang: number;
+  /** loading all the chambers again (s) */
+  reload: number;
 }
 
-/** a flintlock pistol: walnut stock with a brass butt cap, octagonal-to-round iron barrel, lock on the right */
-export function makePistol(): Pistol {
-  const group = new THREE.Group();
-  const add = (geo: THREE.BufferGeometry, mat: THREE.Material, parent: THREE.Object3D = group) => { const m = new THREE.Mesh(geo, mat); parent.add(m); return m; };
-  // stock: a side profile (s forward, v up), extruded across and turned so s → −Z
-  const P: [number, number][] = [[0.255, 0.004], [0.12, 0.006], [0.03, 0.01], [0.0, 0.014], [-0.028, 0.004], [-0.058, -0.028], [-0.086, -0.066],
-    [-0.108, -0.106], [-0.118, -0.124], [-0.1, -0.138], [-0.072, -0.13], [-0.054, -0.098], [-0.036, -0.066], [-0.016, -0.038], [0.012, -0.024],
-    [0.06, -0.018], [0.255, -0.011]];
-  const shape = new THREE.Shape(P.map(([s, v]) => new THREE.Vector2(s, v)));
-  const stock = new THREE.ExtrudeGeometry(shape, { depth: 0.026, bevelEnabled: true, bevelThickness: 0.004, bevelSize: 0.004, bevelSegments: 2, curveSegments: 6 });
-  stock.rotateY(Math.PI / 2);
-  stock.translate(-0.013, 0, 0);
-  add(stock, MATERIALS.walnut);
-  // barrel: octagonal at the breech, round beyond, a brass ring at the muzzle
-  const breech = new THREE.CylinderGeometry(0.0125, 0.0128, 0.09, 8);
-  breech.rotateX(Math.PI / 2);
-  breech.translate(0, 0.017, -0.045);
-  add(breech, MATERIALS.iron);
-  const tube = new THREE.CylinderGeometry(0.0098, 0.011, 0.215, 16, 1, true);
-  tube.rotateX(Math.PI / 2);
-  tube.translate(0, 0.017, -0.197);
-  add(tube, MATERIALS.iron);
-  const ring = new THREE.CylinderGeometry(0.0118, 0.0118, 0.01, 16);
-  ring.rotateX(Math.PI / 2);
-  ring.translate(0, 0.017, -0.298);
-  add(ring, MATERIALS.brass);
-  const bore = new THREE.CircleGeometry(0.006, 12);
-  bore.translate(0, 0.017, -0.3035);
-  add(bore, new THREE.MeshBasicMaterial({ color: 0x050505 }));
-  // ramrod under the barrel
-  const rod = new THREE.CylinderGeometry(0.0033, 0.0033, 0.23, 6);
-  rod.rotateX(Math.PI / 2);
-  rod.translate(0, -0.003, -0.16);
-  add(rod, MATERIALS.walnut);
-  // lock on the right side: plate, pan, frizzen, and the cock (a child, so it can fall)
-  const plate = new THREE.BoxGeometry(0.004, 0.024, 0.078);
-  plate.translate(0.016, 0.005, -0.03);
-  add(plate, MATERIALS.iron);
-  const panG = new THREE.BoxGeometry(0.012, 0.005, 0.014);
-  panG.translate(0.02, 0.019, -0.04);
-  add(panG, MATERIALS.brass);
-  const frizzen = new THREE.BoxGeometry(0.006, 0.026, 0.006);
-  frizzen.rotateX(0.35);
-  frizzen.translate(0.02, 0.033, -0.047);
-  add(frizzen, MATERIALS.iron);
-  const cock = new THREE.Group();
-  cock.position.set(0.02, 0.012, -0.004);
-  const neck = new THREE.BoxGeometry(0.005, 0.03, 0.009);
-  neck.translate(0, 0.015, 0);
-  add(neck, MATERIALS.iron, cock);
-  const jaw = new THREE.BoxGeometry(0.007, 0.007, 0.02);
-  jaw.translate(0, 0.03, -0.008);
-  add(jaw, MATERIALS.iron, cock);
-  cock.rotation.x = 0.55; // drawn back (cocked)
-  group.add(cock);
-  // trigger guard (a brass half-ring) and trigger
-  const guard = new THREE.TorusGeometry(0.02, 0.0024, 6, 18, Math.PI);
-  guard.rotateZ(Math.PI);
-  guard.rotateY(Math.PI / 2);
-  guard.translate(0, -0.022, -0.02);
-  add(guard, MATERIALS.brass);
-  const trig = new THREE.BoxGeometry(0.003, 0.018, 0.004);
-  trig.rotateX(-0.3);
-  trig.translate(0, -0.028, -0.016);
-  add(trig, MATERIALS.iron);
-  // brass butt cap
-  const cap = new THREE.SphereGeometry(0.021, 14, 10);
-  cap.scale(0.85, 0.75, 1.05);
-  cap.translate(0, -0.126, 0.106);
-  add(cap, MATERIALS.brass);
-  const muzzle = new THREE.Object3D(); muzzle.position.set(0, 0.017, -0.305); group.add(muzzle);
-  const pan = new THREE.Object3D(); pan.position.set(0.02, 0.024, -0.04); group.add(pan);
-  // where the hand holds it: round the butt, the index finger along the trigger
-  const grip = gripFrame(new THREE.Vector3(0, -0.07, 0.066), new THREE.Vector3(0, 0.07, -0.075));
+/**
+ * A flintlock pistol of the early 18th century: walnut stock, the lock on the right, a grotesque mask on the
+ * butt cap. One shot, then loading it again — powder, ball, ramrod, priming the pan.
+ */
+export async function makeFlintlock(): Promise<Pistol> {
+  const m = await load('flintlock');
+  // (model: metres, the muzzle toward −x, the lock on the −z side, one mesh — the cock cut out of it)
+  let mesh: THREE.Mesh | null = null;
+  m.traverse((o) => { if ((o as THREE.Mesh).isMesh && !mesh) mesh = o as THREE.Mesh; });
+  const box = (x0: number, y0: number, z0: number, x1: number, y1: number, z1: number) => new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+  splitPart(mesh!, [box(-0.004, 0.028, -0.035, 0.03, 0.075, -0.011), box(-0.004, 0.04, -0.011, 0.03, 0.075, 0.006)], 'cock');
+  const setCock = hinge(m, 'cock', new THREE.Vector3(0.02, 0.032, -0.02), new THREE.Vector3(0, 0, 1));
+  tame(m);
+  const bore = new THREE.Vector3(-1, 0, 0);
+  const muzzleM = new THREE.Vector3(-0.2165, 0.022, 0);
+  const { group, toGroup } = place(m, 1, facing(bore, new THREE.Vector3(0, 1, 0)), muzzleM, new THREE.Vector3(0, 0.017, -0.305));
+  const muzzle = new THREE.Object3D();
+  muzzle.position.copy(toGroup(muzzleM));
+  group.add(muzzle);
+  // the grip: the butt, rising forward to the lock; held high, the palm on its right (+X)
+  const g0 = toGroup(new THREE.Vector3(0.112, -0.058, 0)), g1 = toGroup(new THREE.Vector3(0.058, -0.008, 0));
+  const grip = gripFrame(g0.clone().lerp(g1, 1.0), g1.clone().sub(g0), new THREE.Vector3(1, 0, 0));
   group.add(grip);
-  return { group, muzzle, pan, cock, grip };
+  return {
+    group, muzzle, grip, chambers: 1, hang: 0.085, reload: 3,
+    // (the model has the cock drawn back: it falls forward onto the frizzen)
+    setHammer: (k) => setCock(0.65 * (1 - k)),
+    setCylinder: () => {},
+  };
+}
+
+/** a cap-and-ball revolver: the barrel along −Z, the hammer and the cylinder on hinges */
+export async function makePistol(): Promise<Pistol> {
+  const m = await load('revolver');
+  // (model: ~dm units, the bore along +x tilted up ~15° and a little aside, the top +y)
+  const bore = new THREE.Vector3(0.9634, 0.2637, -0.0476).normalize();
+  const pin = new THREE.Vector3(0, 0, 1).addScaledVector(bore, -bore.z).normalize();
+  const setHammer = hinge(m, 'trigger_1_low', new THREE.Vector3(-0.4, -0.24, 0.03), pin);
+  const setCyl = hinge(m, 'barrel_low', new THREE.Vector3(-0.087, 0.016, -0.003), bore);
+  tame(m);
+  // the muzzle where the old pistol's was, so the poses still frame it
+  const muzzleM = new THREE.Vector3(1.834, 0.531, -0.096).addScaledVector(bore, 0.06);
+  const { group, toGroup } = place(m, 0.1, facing(bore, new THREE.Vector3(0, 1, 0)), muzzleM, new THREE.Vector3(0, 0.017, -0.305));
+  const muzzle = new THREE.Object3D();
+  muzzle.position.copy(toGroup(muzzleM));
+  group.add(muzzle);
+  // the grip: the walnut butt, rising forward to the frame; the palm on its right (+X)
+  const g0 = toGroup(new THREE.Vector3(-0.725, -0.8, 0.03)), g1 = toGroup(new THREE.Vector3(-0.725 + 0.364, -0.8 + 0.917, 0.03));
+  // (held high on the butt, the web of the hand up under the hammer)
+  const grip = gripFrame(g0.clone().lerp(g1, 0.2), g1.clone().sub(g0), new THREE.Vector3(1, 0, 0));
+  group.add(grip);
+  return {
+    group, muzzle, grip, chambers: 6, hang: 0.012, reload: 3.5,
+    // (the model has it drawn back: fired, it lies forward on the cap)
+    setHammer: (k) => setHammer(-0.5 * (1 - k)),
+    setCylinder: (a) => setCyl(a),
+  };
 }
 
 export interface Rapier {
@@ -124,57 +204,17 @@ export interface Rapier {
   grip: THREE.Object3D;
 }
 
-/** a swept-hilt rapier: long narrow blade, wire-bound grip, quillons, side rings and a knuckle bow */
-export function makeRapier(): Rapier {
-  const group = new THREE.Group();
-  const add = (geo: THREE.BufferGeometry, mat: THREE.Material) => { const m = new THREE.Mesh(geo, mat); group.add(m); return m; };
-  // blade: a flattened diamond section tapering to a point, along −Z
-  const blade = new THREE.CylinderGeometry(0.0012, 0.0115, 0.95, 4, 8);
-  blade.rotateY(Math.PI / 4);
-  blade.scale(1, 1, 0.32);
-  blade.rotateX(-Math.PI / 2);
-  blade.translate(0, 0, -0.035 - 0.475);
-  add(blade, MATERIALS.blade);
-  const ricasso = new THREE.BoxGeometry(0.014, 0.006, 0.04);
-  ricasso.translate(0, 0, -0.02);
-  add(ricasso, MATERIALS.blade);
-  // grip: wire-bound, with ferrules, and a round pommel
-  const wound = new THREE.CylinderGeometry(0.0115, 0.0125, 0.1, 12);
-  wound.rotateX(Math.PI / 2);
-  wound.translate(0, 0, 0.055);
-  add(wound, MATERIALS.wire);
-  for (const z of [0.006, 0.104]) {
-    const f = new THREE.CylinderGeometry(0.0138, 0.0138, 0.008, 12);
-    f.rotateX(Math.PI / 2);
-    f.translate(0, 0, z);
-    add(f, MATERIALS.iron);
-  }
-  const pommel = new THREE.SphereGeometry(0.019, 16, 12);
-  pommel.scale(1, 1, 1.15);
-  pommel.translate(0, 0, 0.125);
-  add(pommel, MATERIALS.iron);
-  // quillons, with knobs
-  const quil = new THREE.CylinderGeometry(0.0048, 0.0048, 0.2, 8);
-  quil.rotateZ(Math.PI / 2);
-  quil.translate(0, 0, 0.0);
-  add(quil, MATERIALS.iron);
-  for (const x of [-0.1, 0.1]) { const k = new THREE.SphereGeometry(0.009, 10, 8); k.translate(x, 0, 0); add(k, MATERIALS.iron); }
-  // side rings round the blade's base, and a knuckle bow down over the fingers to the pommel
-  for (const [r, z] of [[0.03, -0.028], [0.021, -0.012]]) {
-    const ringG = new THREE.TorusGeometry(r, 0.0032, 6, 26);
-    ringG.rotateX(Math.PI / 2);
-    ringG.scale(1, 1, 0.7);
-    ringG.translate(0, 0, z);
-    add(ringG, MATERIALS.iron);
-  }
-  const bow = new THREE.TubeGeometry(new THREE.CatmullRomCurve3([
-    new THREE.Vector3(0, -0.004, -0.004), new THREE.Vector3(0, -0.042, 0.02), new THREE.Vector3(0, -0.05, 0.065), new THREE.Vector3(0, -0.028, 0.112), new THREE.Vector3(0, -0.012, 0.122),
-  ]), 20, 0.0034, 6, false);
-  add(bow, MATERIALS.iron);
-  for (const m of group.children) (m as THREE.Mesh).geometry.computeVertexNormals();
-  const base = new THREE.Object3D(); base.position.set(0, 0, -0.05); group.add(base);
-  const tip = new THREE.Object3D(); tip.position.set(0, 0, -0.98); group.add(tip);
-  // where the hand holds it: round the grip, the fingers inside the knuckle bow
+/** a Spanish cup-hilt rapier: the blade along −Z, its edges up and down, the knuckle bow under the fingers (−Y) */
+export async function makeRapier(): Promise<Rapier> {
+  const m = await load('rapier');
+  tame(m);
+  // (polished steel an arm's length from the eye mirrors the whole bright sky: less of it)
+  m.traverse((o) => { const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined; if (mat?.isMeshStandardMaterial) mat.envMapIntensity = 0.35; });
+  // (model: the tip at z −1, the pommel at +1, the knuckle bow toward −x; ~1.24 m overall at this scale)
+  const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
+  const { group, toGroup } = place(m, 0.62, q, new THREE.Vector3(0.0045, 0, 0.805), new THREE.Vector3(0, 0, 0.056));
+  const base = new THREE.Object3D(); base.position.copy(toGroup(new THREE.Vector3(0, 0, 0.52))); group.add(base);
+  const tip = new THREE.Object3D(); tip.position.copy(toGroup(new THREE.Vector3(0, 0, -1))); group.add(tip);
   const grip = gripFrame(new THREE.Vector3(0, 0, 0.056), new THREE.Vector3(0, 0, -1));
   group.add(grip);
   return { group, base, tip, grip };
@@ -182,71 +222,75 @@ export function makeRapier(): Rapier {
 
 export interface Lantern {
   group: THREE.Group;
-  /** the part that swings (everything below the hand), pivoting on the bail */
+  /** the part that swings (everything below the hand), pivoting on the handle */
   body: THREE.Group;
-  flame: THREE.Mesh;
-  glass: THREE.MeshStandardMaterial;
+  /** where the flame is: its light hangs here */
+  flame: THREE.Object3D;
+  /** what glows with the flame (their emissive intensity flickers round `glowBase`) */
+  glow: THREE.MeshStandardMaterial[];
+  glowBase: number;
+  /** its light: colour, strength (× the flicker) and reach (m) */
+  light: { color: THREE.Color; intensity: number; distance: number };
   grip: THREE.Object3D;
 }
 
 /**
- * A ship's hand lantern, held overhand by its bail: a brass cap with a chimney, a glass chimney-globe in a
- * wire cage, a candle burning inside, a brass base. The bail's top is at the origin, running along X; the
- * lantern hangs below it.
+ * A ship's hand lantern: a green-painted iron body round panes of horn-pale glass, a peaked bail on top, a
+ * candle burning in its dish at the bottom. Held overhand by the peak of the bail.
  */
-export function makeLantern(): Lantern {
-  const group = new THREE.Group(), body = new THREE.Group();
-  group.add(body);
-  const add = (geo: THREE.BufferGeometry, mat: THREE.Material) => { const m = new THREE.Mesh(geo, mat); body.add(m); return m; };
-  // bail: a half ring up from the cap's sides to the hand
-  const bail = new THREE.TorusGeometry(0.036, 0.0032, 6, 18, Math.PI);
-  bail.translate(0, -0.036, 0);
-  add(bail, MATERIALS.iron);
-  // cap with a little chimney
-  const cap = new THREE.CylinderGeometry(0.022, 0.056, 0.045, 18, 1);
-  cap.translate(0, -0.06, 0);
-  add(cap, MATERIALS.brass);
-  const chim = new THREE.CylinderGeometry(0.012, 0.014, 0.022, 12);
-  chim.translate(0, -0.03, 0);
-  add(chim, MATERIALS.brass);
-  const rim = new THREE.TorusGeometry(0.052, 0.004, 6, 24);
-  rim.rotateX(Math.PI / 2);
-  rim.translate(0, -0.083, 0);
-  add(rim, MATERIALS.brass);
-  // the glass, lit from inside
-  // (clear, faintly amber glass: the candle shows through, the glass itself only glows a little)
-  const glass = new THREE.MeshStandardMaterial({ color: srgb(0.9, 0.8, 0.6), roughness: 0.05, metalness: 0, transparent: true, opacity: 0.22,
-    emissive: new THREE.Color(1, 0.55, 0.2), emissiveIntensity: 0.3, depthWrite: false });
-  const globe = new THREE.CylinderGeometry(0.046, 0.046, 0.12, 24, 1, true);
-  globe.translate(0, -0.145, 0);
-  add(globe, glass);
-  // cage: four wires and a mid band
-  for (let k = 0; k < 4; k++) {
-    const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
-    const w = new THREE.CylinderGeometry(0.0022, 0.0022, 0.125, 5);
-    w.translate(Math.cos(a) * 0.05, -0.145, Math.sin(a) * 0.05);
-    add(w, MATERIALS.iron);
-  }
-  const band = new THREE.TorusGeometry(0.05, 0.0022, 5, 24);
-  band.rotateX(Math.PI / 2);
-  band.translate(0, -0.145, 0);
-  add(band, MATERIALS.iron);
-  // base
-  const base = new THREE.CylinderGeometry(0.055, 0.05, 0.022, 20);
-  base.translate(0, -0.215, 0);
-  add(base, MATERIALS.brass);
-  // the candle and its flame
-  const candle = new THREE.CylinderGeometry(0.011, 0.012, 0.05, 12);
-  candle.translate(0, -0.18, 0);
-  add(candle, new THREE.MeshStandardMaterial({ color: srgb(0.93, 0.88, 0.72), roughness: 0.7, emissive: new THREE.Color(0.5, 0.3, 0.1), emissiveIntensity: 0.6 }));
-  const fl = new THREE.SphereGeometry(0.008, 10, 8);
-  fl.scale(1, 2.2, 1);
-  fl.translate(0, 0.016, 0);
-  const flame = new THREE.Mesh(fl, new THREE.MeshBasicMaterial({ color: new THREE.Color(6, 3.6, 1.2) }));
-  flame.position.set(0, -0.155, 0);
+export async function makeLantern(): Promise<Lantern> {
+  const m = await load('candle_lantern');
+  tame(m);
+  // (model: ~2 units tall, the peak of the bail at y 0.99, the candle's wick at y −0.72; ~0.3 m tall here)
+  const s = 0.15;
+  const { group: body, toGroup } = place(m, s, new THREE.Quaternion(), new THREE.Vector3(0, 0.99, 0));
+  // the candle's flame: a small teardrop of fire over the wick, glowing — and the light hangs in it
+  const flameMat = new THREE.MeshStandardMaterial({ color: 0x000000, emissive: new THREE.Color(1, 0.62, 0.25), emissiveIntensity: 6 });
+  const fl = new THREE.SphereGeometry(0.0042, 12, 10);
+  fl.scale(1, 2.3, 1);
+  fl.translate(0, 0.0085, 0);
+  const flameMesh = new THREE.Mesh(fl, flameMat);
+  flameMesh.position.copy(toGroup(new THREE.Vector3(0, -0.72, 0)));
+  body.add(flameMesh);
+  const flame = new THREE.Object3D();
+  flame.position.copy(flameMesh.position).add(new THREE.Vector3(0, 0.009, 0));
   body.add(flame);
-  // held overhand: palm on top of the bail, fingers round its front, the arm back and down to the right
+  const group = new THREE.Group();
+  group.add(body);
   const grip = gripFrame(new THREE.Vector3(0, 0, 0), new THREE.Vector3(-1, 0, 0));
   group.add(grip);
-  return { group, body, flame, glass, grip };
+  return { group, body, flame, glow: [flameMat], glowBase: 6, light: { color: new THREE.Color(0xffb060), intensity: 42, distance: 38 }, grip };
+}
+
+/**
+ * The dark lantern: a skull hung by a braided cord, its jaw slung below on chains round a candle — and the
+ * candle burns with a cold, sickly green flame that lights only a little way round.
+ */
+export async function makeSkullLantern(): Promise<Lantern> {
+  const m = await load('skull_lantern');
+  tame(m);
+  // the flame: a card with a flame's picture over the candle, lit from within and added to the light
+  const glow: THREE.MeshStandardMaterial[] = [];
+  m.traverse((o) => {
+    const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (mat?.name === 'Daco_5128727' && !glow.includes(mat)) {
+      mat.emissive.setRGB(0.55, 1, 0.65);
+      mat.emissiveMap = mat.map;
+      mat.emissiveIntensity = 4;
+      mat.blending = THREE.AdditiveBlending;
+      mat.depthWrite = false;
+      mat.side = THREE.DoubleSide;
+      glow.push(mat);
+    }
+  });
+  // ~0.36 m from the top of the cord to the jaw; the top of the cord at the origin
+  const { group: body, toGroup } = place(m, 0.02, new THREE.Quaternion(), new THREE.Vector3(-0.074, 17.2, -1.43));
+  const flame = new THREE.Object3D();
+  flame.position.copy(toGroup(new THREE.Vector3(0.0875, 5.4, 0.251)));
+  body.add(flame);
+  const group = new THREE.Group();
+  group.add(body);
+  const grip = gripFrame(new THREE.Vector3(0, 0, 0), new THREE.Vector3(-1, 0, 0));
+  group.add(grip);
+  return { group, body, flame, glow, glowBase: 4, light: { color: new THREE.Color(0x7dff9a), intensity: 16, distance: 20 }, grip };
 }

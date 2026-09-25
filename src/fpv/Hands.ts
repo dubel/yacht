@@ -10,7 +10,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
  * down and out to the side.
  *
  * In the rig the hand bone is not a child of the forearm (a first-person rig: the hand is placed, the arm is
- * solved to it). Its frame is the model's own; `gripFrame` gives, for a grip of radius r, where that grip
+ * solved to it). Its frame is the model's own; `fitted` gives, for a grasp, where the grip
  * lies in the hand — in the convention of the weapons' grips (models.ts): the grip along +Y (little finger
  * → index), the palm on the +X side, the fingers wrapping round the front (−Z).
  */
@@ -45,7 +45,7 @@ export interface Grasp {
   pinky: [number, number, number];
   thumb: [number, number, number];
   thumbAcross: number;
-  /** radius of the grip (m) */
+  /** radius of the grip (m): the fingers close until they lie on it (see fitted) */
   radius: number;
 }
 
@@ -56,8 +56,8 @@ export class Hands {
   private readonly bones = new Map<string, THREE.Bone>();
   private readonly rest = new Map<string, THREE.Quaternion>();
   private readonly restPos = new Map<string, THREE.Vector3>();
-  /** grip frame → hand bone, for a grip of radius r (cached by r) */
-  private readonly gripCache = new Map<number, THREE.Matrix4>();
+  /** how far the fingers close on each grasp and the grip frame in the hand then (see fitted) */
+  private readonly gripCache = new WeakMap<Grasp, { k: number; frame: THREE.Matrix4 }>();
   private upperLen = 0.25;
   private foreLen = 0.28;
   private readonly m = new THREE.Matrix4();
@@ -106,34 +106,72 @@ export class Hands {
   }
 
   /**
-   * The grip frame in the hand bone's frame, for a grip of radius r: its axis along the line of the knuckles
-   * (little finger → index), in front of the palm by the grip's radius and a little more.
+   * The fist as the fingers are now: the grip frame in the hand bone's frame — its axis along the line of the
+   * knuckles (little finger → index), its centre in the middle of the fist: the centre of the circle the
+   * middle, ring and little fingers' joints lie on, seen down that axis — and that circle's radius. A hand
+   * too open to make a fist falls back to a grip of `radius` in front of the palm (R: Infinity).
    */
-  private gripFrame(r: number): THREE.Matrix4 {
-    const key = Math.round(r * 1e4);
-    const hit = this.gripCache.get(key);
-    if (hit) return hit;
-    // knuckles and wrist in the hand bone's frame (they don't move with the fingers)
+  private fist(radius: number): { frame: THREE.Matrix4; R: number } {
     const hand = this.bone(B.hand);
     hand.updateWorldMatrix(true, true);
     const inv = new THREE.Matrix4().copy(hand.matrixWorld).invert();
     const at = (n: string) => this.bone(n).getWorldPosition(new THREE.Vector3()).applyMatrix4(inv);
     const idx = at(FINGERS.index[0]), pky = at(FINGERS.pinky[0]), mid = at(FINGERS.middle[0]);
-    const wrist = new THREE.Vector3();
     const y = idx.clone().sub(pky).normalize();
-    // along the hand, wrist → knuckles, square to the grip
-    const along = mid.clone().sub(wrist);
-    along.addScaledVector(y, -along.dot(y)).normalize();
+    // along the hand, wrist (the bone's origin) → knuckles, square to the grip
+    const along = mid.clone().addScaledVector(y, -mid.dot(y)).normalize();
     // the palm faces y × along for a right hand (palm down, fingers ahead: the index to the left, so
     // left × ahead = down): the grip lies on that side
     const toGrip = new THREE.Vector3().crossVectors(y, along).normalize();
     const knuckles = idx.clone().add(pky).multiplyScalar(0.5);
-    const origin = knuckles.addScaledVector(toGrip, r + 0.016).addScaledVector(along, -0.022);
+    // a circle fitted (least squares, Kåsa) to the finger joints in the plane square to the grip
+    const pts: [number, number][] = [];
+    for (const f of ['middle', 'ring', 'pinky'] as const) for (const n of FINGERS[f]) { const p = at(n); pts.push([p.dot(along), p.dot(toGrip)]); }
+    let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0, sxz = 0, syz = 0, sz = 0;
+    for (const [u, v] of pts) { const z = u * u + v * v; sx += u; sy += v; sxx += u * u; syy += v * v; sxy += u * v; sxz += u * z; syz += v * z; sz += z; }
+    // [sxx sxy sx; sxy syy sy; sx sy N]·[D E F] = −[sxz syz sz]
+    const A = new THREE.Matrix3().set(sxx, sxy, sx, sxy, syy, sy, sx, sy, pts.length);
+    const sol = new THREE.Vector3(-sxz, -syz, -sz).applyMatrix3(A.clone().invert());
+    const cu = -sol.x / 2, cv = -sol.y / 2;
+    let R = Math.sqrt(Math.max(0, cu * cu + cv * cv - sol.z));
+    const origin = knuckles.clone().addScaledVector(along, -knuckles.dot(along)).addScaledVector(toGrip, -knuckles.dot(toGrip));
+    if (Number.isFinite(R) && R > 0.01 && R < 0.07) origin.addScaledVector(along, cu).addScaledVector(toGrip, cv);
+    else { origin.copy(knuckles).addScaledVector(toGrip, radius + 0.016).addScaledVector(along, -0.022); R = Infinity; }
     // grip frame axes in the hand's frame: X toward the palm, Y along the grip, Z = X × Y
     const X = toGrip.clone().negate(), Z = new THREE.Vector3().crossVectors(X, y);
-    const g = new THREE.Matrix4().makeBasis(X, y, Z).setPosition(origin);
-    this.gripCache.set(key, g);
-    return g;
+    return { frame: new THREE.Matrix4().makeBasis(X, y, Z).setPosition(origin), R };
+  }
+
+  /** the fingers back to rest, then bent to `grasp` — its four fingers' bends scaled by `k`, the thumb as given */
+  private curl(grasp: Grasp, k: number): void {
+    for (const n of Object.values(FINGERS).flat()) { const r = this.rest.get(n); if (r) this.bone(n).quaternion.copy(r); }
+    const bend = (f: Finger, a: [number, number, number], s: number) => a.forEach((b, i) => this.bone(FINGERS[f][i]).quaternion.multiply(this.q.setFromAxisAngle(Z_AXIS, b * s)));
+    bend('index', grasp.index, k); bend('middle', grasp.middle, k); bend('ring', grasp.ring, k); bend('pinky', grasp.pinky, k);
+    bend('thumb', grasp.thumb, 1);
+    this.bone(FINGERS.thumb[0]).quaternion.multiply(this.q.setFromAxisAngle(X_AXIS, grasp.thumbAcross));
+  }
+
+  /**
+   * How far to close the fingers on this grasp, and the grip frame then: the fingers close (their bends
+   * scaled together) until the fist is as round as the grip — its joints a finger's thickness out from its
+   * surface — so the fingertips lie on the grip, not in it. Found once per grasp (bisection).
+   */
+  private fitted(grasp: Grasp): { k: number; frame: THREE.Matrix4 } {
+    const hit = this.gripCache.get(grasp);
+    if (hit) return hit;
+    const target = grasp.radius + FINGER;
+    let lo = 0.2, hi = 2;
+    for (let n = 0; n < 14; n++) {
+      const k = (lo + hi) / 2;
+      this.curl(grasp, k);
+      // (more bend, a smaller fist)
+      if (this.fist(grasp.radius).R > target) lo = k; else hi = k;
+    }
+    const k = (lo + hi) / 2;
+    this.curl(grasp, k);
+    const fit = { k, frame: this.fist(grasp.radius).frame };
+    this.gripCache.set(grasp, fit);
+    return fit;
   }
 
   /**
@@ -144,21 +182,16 @@ export class Hands {
     if (!this.loaded) return;
     this.root.visible = !!grip && !!grasp;
     if (!grip || !grasp) return;
-    // back to rest, then the grasp
-    for (const n of [B.shoulder, B.elbow, B.twist, B.hand, ...Object.values(FINGERS).flat()]) {
-      const r = this.rest.get(n);
-      if (r) this.bone(n).quaternion.copy(r);
-    }
+    // back to rest, then the grasp, the fingers closed round the grip
+    for (const n of [B.shoulder, B.elbow, B.twist, B.hand]) this.bone(n).quaternion.copy(this.rest.get(n)!);
     this.bone(B.shoulder).position.copy(this.restPos.get(B.shoulder)!);
-    const bend = (f: Finger, a: [number, number, number]) => a.forEach((k, i) => this.bone(FINGERS[f][i]).quaternion.multiply(this.q.setFromAxisAngle(Z_AXIS, k)));
-    bend('index', grasp.index); bend('middle', grasp.middle); bend('ring', grasp.ring); bend('pinky', grasp.pinky);
-    bend('thumb', grasp.thumb);
-    this.bone(FINGERS.thumb[0]).quaternion.multiply(this.q.setFromAxisAngle(X_AXIS, grasp.thumbAcross));
+    const fit = this.fitted(grasp);
+    this.curl(grasp, fit.k);
 
     // the hand: its world matrix = grip · (grip frame in the hand)⁻¹
     const hand = this.bone(B.hand);
     grip.updateWorldMatrix(true, false);
-    const want = this.m.copy(grip.matrixWorld).multiply(new THREE.Matrix4().copy(this.gripFrame(grasp.radius)).invert());
+    const want = this.m.copy(grip.matrixWorld).multiply(new THREE.Matrix4().copy(fit.frame).invert());
     hand.parent!.updateWorldMatrix(true, false);
     const local = new THREE.Matrix4().copy(hand.parent!.matrixWorld).invert().multiply(want);
     local.decompose(hand.position, hand.quaternion, this.v);
@@ -206,4 +239,6 @@ export class Hands {
 }
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+/** a finger's joints lie this far (m) out from what it closes on: the finger's half-thickness */
+const FINGER = 0.0085;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);

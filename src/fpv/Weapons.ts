@@ -1,50 +1,60 @@
 import * as THREE from 'three';
 import type { Input } from '../core/Input';
-import { makeLantern, makePistol, makeRapier, type Lantern, type Pistol, type Rapier } from './models';
+import { makeFlintlock, makeLantern, makePistol, makeRapier, makeSkullLantern, type Lantern, type Pistol, type Rapier } from './models';
 import { Hands, type Grasp } from './Hands';
 
 /*
- * What the sailor holds on deck: 1 the flintlock pistol, 2 the rapier, 3 a lantern (the spyglass, 0, is its
- * own thing).
+ * What the sailor holds on deck: 1 the flintlock pistol, 2 the rapier, 3 a lantern, 7 the revolver, 8 the dark
+ * lantern (the spyglass, 0, is its own thing). The pieces are models (models.ts), loaded before the game starts (load).
  * The models live in an overlay scene drawn last with the depth cleared, so a barrel or blade never sinks
  * into a rail or a mast; the overlay's root follows the camera every frame, and the held piece sits in it
  * at arm's length, swaying a little behind the mouse and bobbing with the stride.
  *
  * Pistol: Ctrl (or a click) lets the cock fall — the pan flashes, and a heartbeat later the charge goes off
- * (flash, recoil, a ball on its way); it takes RELOAD s to load again. Rapier: Ctrl cuts, alternately from
+ * (flash, recoil, a ball on its way); loading it again takes a few seconds, then the cock is drawn back.
+ * Revolver: the hammer falls on the cap and the chamber goes off at once; the hammer is drawn back again,
+ * turning the cylinder to the next chamber — six, and then it takes a while to load them all. Rapier: Ctrl cuts, alternately from
  * high left to low right and from high right to low left, a fading trail behind the blade. Lantern: held
- * overhand by the bail, swinging like a pendulum as the sailor walks and turns; it lights the world (a real
- * light in the main scene, so the deck, the sails, the sea — and one day a beach — are lit by it) and the hand
- * that holds it; Ctrl held lifts it higher and forward, to light further.
+ * overhand by the bail (the dark one by its cord), swinging like a pendulum as the sailor walks and turns; its
+ * flame lights the world (a real light in the main scene, so the deck, the sails, the sea, a beach are lit by
+ * it) and the hand that holds it; Ctrl held lifts it higher and forward, to light further.
  */
 
-export type Weapon = 'none' | 'pistol' | 'rapier' | 'lantern';
+export type Weapon = 'none' | 'pistol' | 'revolver' | 'rapier' | 'lantern' | 'skull';
+type Gun = 'pistol' | 'revolver';
+const isGun = (w: Weapon): w is Gun => w === 'pistol' || w === 'revolver';
+const PIECES = ['pistol', 'revolver', 'rapier', 'lantern', 'skull'] as const;
+type Lamp = 'lantern' | 'skull';
+const isLamp = (w: Weapon): w is Lamp => w === 'lantern' || w === 'skull';
 
-const PISTOL_RELOAD = 3;
+/** from a shot until the hammer is drawn back for the next (s) */
+const CYCLE = 0.3;
 const SLASH_TIME = 0.42;
-const HANG_FIRE = 0.085; // pan flash → shot
 
 interface Pose { p: THREE.Vector3; r: THREE.Euler }
 const pose = (x: number, y: number, z: number, rx: number, ry: number, rz: number): Pose => ({ p: new THREE.Vector3(x, y, z), r: new THREE.Euler(rx, ry, rz, 'YXZ') });
 
 const PISTOL_REST = pose(0.16, -0.105, -0.42, 0.04, 0.08, 0);
-const RAPIER_GUARD = pose(0.17, -0.13, -0.36, 0.32, 0.22, -0.35);
-const LANTERN_HOLD = pose(0.2, -0.01, -0.43, 0.05, -0.25, 0);
+const RAPIER_GUARD = pose(0.19, -0.16, -0.42, 0.32, 0.22, -0.35);
+const LANTERN_HOLD = pose(0.2, 0.05, -0.47, 0.05, -0.25, 0);
 const LANTERN_UP = pose(0.1, 0.12, -0.56, 0.2, -0.1, 0);
 // the two cuts: start (high, to one side, blade raised) → end (low, across the other side)
 const CUTS: [Pose, Pose][] = [
-  [pose(-0.06, 0.06, -0.3, 1.25, 0.75, -0.9), pose(0.34, -0.36, -0.36, -0.55, -0.85, -0.9)],
-  [pose(0.42, 0.06, -0.3, 1.25, -0.75, 0.9), pose(-0.1, -0.36, -0.36, -0.55, 0.85, 0.9)],
+  [pose(-0.06, 0.06, -0.34, 1.25, 0.75, -0.9), pose(0.3, -0.26, -0.42, -0.55, -0.85, -0.9)],
+  [pose(0.36, 0.06, -0.34, 1.25, -0.75, 0.9), pose(-0.08, -0.26, -0.42, -0.55, 0.85, 0.9)],
 ];
 
 /** how the hand closes on each piece (see Hands) */
 export const GRASP: Record<Exclude<Weapon, 'none'>, Grasp> = {
   // the index finger along the trigger, the rest round the butt
-  pistol: { index: [0.3, 0.4, 0.5], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-0.5, 0.3, 0.3], thumbAcross: 0.2, radius: 0.0155 },
-  // the fingers round the wire-bound grip inside the knuckle bow, the thumb along it toward the guard
-  rapier: { index: [0.9, 1, 0.8], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-0.5, 0.3, 0.3], thumbAcross: 0.2, radius: 0.012 },
+  pistol: { index: [0.3, 0.4, 0.5], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-0.5, 0.3, 0.3], thumbAcross: 0.2, radius: 0.016 },
+  revolver: { index: [0.3, 0.4, 0.5], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-0.5, 0.3, 0.3], thumbAcross: 0.2, radius: 0.0155 },
+  // a fist round the wire-bound grip inside the knuckle bow, the thumb over it to the index finger
+  rapier: { index: [0.9, 1, 0.8], middle: [1.05, 1.1, 0.8], ring: [1.05, 1.1, 0.8], pinky: [1, 1.1, 0.8], thumb: [-1, 0.7, 0.6], thumbAcross: 0.6, radius: 0.02 },
   // overhand on the bail: the fingers hooked round the wire
   lantern: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.005 },
+  // the same round the dark lantern's braided cord
+  skull: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.007 },
 };
 
 export class Weapons {
@@ -54,19 +64,24 @@ export class Weapons {
   weapon: Weapon = 'none';
   /** the pistol was fired: muzzle (world) and the direction the ball leaves in */
   onPistol: ((muzzle: THREE.Vector3, dir: THREE.Vector3) => void) | null = null;
-  /** the flint struck and the pan flashed (sound) */
-  onPan: (() => void) | null = null;
+  /** the hammer fell on the cap (sound); the shot follows `hang` s later */
+  onPan: ((hang: number) => void) | null = null;
   onSlash: ((cut: number) => void) | null = null;
-  /** loaded again */
+  /** the hammer drawn back: ready to fire again */
   onReady: (() => void) | null = null;
+  /** the models have loaded (nothing is drawn or used before) */
+  ready = false;
 
   private readonly root = new THREE.Group();
   /** the arm and hand that hold them */
   readonly hands = new Hands();
-  private readonly pistol: Pistol;
-  private readonly rapier: Rapier;
-  private readonly lantern: Lantern;
-  /** the lantern's light in the world (in the main scene from the start, dark until the lantern is held) */
+  /** the guns: the model, loaded chambers, the hammer (0 down … 1 back) and where it is going, the cylinder's turn */
+  private guns!: Record<Gun, { model: Pistol; rounds: number; hammer: number; hammerTo: number; cylinder: number; cylinderTo: number; cycle: number; reload: number }>;
+  /** the gun whose shot is on its way (its hang-fire running) */
+  private firing: Gun = 'pistol';
+  private rapier!: Rapier;
+  private lamps!: Record<Lamp, Lantern>;
+  /** the lantern's light in the world (in the main scene from the start, dark until a lantern is held) */
   readonly worldLight = new THREE.PointLight(0xffa850, 0, 38, 2);
   private readonly handLight = new THREE.PointLight(0xffa850, 0, 1.5, 2);
   private readonly swing = new THREE.Vector2();
@@ -80,7 +95,6 @@ export class Weapons {
   private held: Weapon = 'none';
   /** 0 put away … 1 in hand */
   private draw = 0;
-  private reload = 0;
   private hang = -1;
   private kick = 0;
   private slashT = -1;
@@ -94,15 +108,8 @@ export class Weapons {
   private readonly slots = document.createElement('div');
 
   constructor() {
-    this.pistol = makePistol();
-    this.rapier = makeRapier();
-    this.lantern = makeLantern();
-    this.lantern.flame.add(this.handLight);
-    this.root.add(this.pistol.group, this.rapier.group, this.lantern.group);
-    this.lantern.group.visible = false;
     this.root.add(this.hands.root);
     this.overlay.add(this.root, this.light, this.light.target);
-    this.pistol.group.visible = this.rapier.group.visible = false;
 
     // muzzle flash: a hot star, and a light that catches the hand for an instant
     const c = document.createElement('canvas');
@@ -117,7 +124,6 @@ export class Weapons {
     this.flash = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), blending: THREE.AdditiveBlending, depthWrite: false, color: new THREE.Color(6, 4.5, 3) }));
     this.flash.scale.setScalar(0.16);
     this.flash.visible = false;
-    this.pistol.muzzle.add(this.flash, this.flashLight);
     this.flash.position.z = -0.05;
 
     // the blade's trail: a ribbon between the last positions of its base and tip
@@ -139,13 +145,23 @@ export class Weapons {
     this.dot.hidden = true;
     this.slots.id = 'slots';
     this.slots.hidden = true;
-    this.slots.innerHTML = '<span data-w="pistol"><kbd>1</kbd> pistolet</span><span data-w="rapier"><kbd>2</kbd> rapier</span><span data-w="lantern"><kbd>3</kbd> latarnia</span><span data-w="spyglass"><kbd>0</kbd> luneta</span>';
+    this.slots.innerHTML = '<span data-w="pistol"><kbd>1</kbd> pistolet</span><span data-w="rapier"><kbd>2</kbd> rapier</span><span data-w="lantern"><kbd>3</kbd> latarnia</span><span data-w="revolver"><kbd>7</kbd> rewolwer</span><span data-w="skull"><kbd>8</kbd> mroczna latarnia</span><span data-w="spyglass"><kbd>0</kbd> luneta</span>';
     document.body.append(this.dot, this.slots);
   }
 
-  /** the arm and hand model (they are drawn only once it has loaded) */
-  async loadHands(url: string): Promise<void> {
-    await this.hands.load(url);
+  /** the pieces and the arm that holds them */
+  async load(): Promise<void> {
+    const [pistol, revolver, rapier, lantern, skull] = await Promise.all([makeFlintlock(), makePistol(), makeRapier(), makeLantern(), makeSkullLantern(), this.hands.load('assets/fpv/hands.glb')]);
+    const gun = (model: Pistol) => { model.setHammer(1); return { model, rounds: model.chambers, hammer: 1, hammerTo: 1, cylinder: 0, cylinderTo: 0, cycle: 0, reload: 0 }; };
+    this.guns = { pistol: gun(pistol), revolver: gun(revolver) };
+    this.rapier = rapier;
+    this.lamps = { lantern, skull };
+    for (const w of PIECES) { const g = this.groupOf(w); g.visible = false; this.root.add(g); }
+    this.ready = true;
+  }
+
+  private groupOf(w: Exclude<Weapon, 'none'>): THREE.Group {
+    return isGun(w) ? this.guns[w].model.group : w === 'rapier' ? this.rapier.group : this.lamps[w].group;
   }
 
   /** anything in hand (Ctrl then belongs to it, not to manning a gun) */
@@ -167,7 +183,7 @@ export class Weapons {
     this.weapon = this.held = 'none';
     this.draw = 0;
     this.slashT = -1;
-    this.pistol.group.visible = this.rapier.group.visible = this.lantern.group.visible = false;
+    if (this.ready) for (const w of PIECES) this.groupOf(w).visible = false;
     this.worldLight.intensity = this.handLight.intensity = 0;
     this.dot.hidden = this.slots.hidden = true;
   }
@@ -177,25 +193,49 @@ export class Weapons {
    * can't be used. `stride`: distance walked (for the bob).
    */
   update(dt: number, input: Input, camera: THREE.PerspectiveCamera, stride: number, lowered: boolean, sunDir: THREE.Vector3, sunColor: THREE.Color, sunIntensity: number, env: THREE.Texture | null): void {
+    if (!this.ready) { this.overlay.visible = false; return; }
     // ---- which piece: the old one goes down before the new one comes up ----
     const want = lowered ? 'none' : this.weapon;
     if (this.held !== want) {
       this.draw = Math.max(0, this.draw - dt / 0.22);
       if (this.draw === 0) { this.held = want; this.slashT = -1; this.trailPts.length = 0; }
     } else if (this.held !== 'none') this.draw = Math.min(1, this.draw + dt / 0.3);
-    this.pistol.group.visible = this.held === 'pistol';
-    this.rapier.group.visible = this.held === 'rapier';
-    this.lantern.group.visible = this.held === 'lantern';
+    for (const w of PIECES) this.groupOf(w).visible = this.held === w;
     this.time += dt;
 
     // ---- use it ----
     const pull = !lowered && this.draw > 0.95 && (input.wasPressed('ControlLeft') || input.wasPressed('ControlRight') || input.click);
-    this.reload = Math.max(0, this.reload - dt);
-    if (this.held === 'pistol') {
-      if (pull && this.reload <= 0 && this.hang < 0) { this.hang = HANG_FIRE; this.reload = PISTOL_RELOAD; this.onPan?.(); }
+    const held = isGun(this.held) ? this.guns[this.held] : null;
+    if (held && pull && held.hammer > 0.95 && held.hammerTo === 1 && held.rounds > 0 && this.hang < 0) {
+      // the cock / hammer falls: the pan flashes, or the cap goes off
+      held.hammerTo = 0;
+      held.rounds--;
+      held.cycle = CYCLE;
+      this.hang = held.model.hang;
+      this.firing = this.held as Gun;
+      held.model.muzzle.add(this.flash, this.flashLight);
+      this.onPan?.(held.model.hang);
+    }
+    for (const g of Object.values(this.guns)) {
+      // the hammer: it falls at once, it is drawn back by the thumb; the cylinder turns as it comes back
+      g.hammer += (g.hammerTo - g.hammer) * Math.min(1, dt * (g.hammerTo < g.hammer ? 60 : 9));
+      g.cylinder += (g.cylinderTo - g.cylinder) * Math.min(1, dt * 9);
+      g.model.setHammer(g.hammer);
+      g.model.setCylinder(g.cylinder);
+      g.cycle = Math.max(0, g.cycle - dt);
+      g.reload = Math.max(0, g.reload - dt);
+      if (g.hammerTo === 0 && this.hang < 0 && g.cycle <= 0) {
+        // all fired: load them all first (the dot goes amber), then draw the hammer back
+        if (g.rounds === 0 && g.reload <= 0) { g.reload = g.model.reload; g.rounds = -1; }
+        else if (g.rounds > 0 || (g.rounds < 0 && g.reload <= 0)) {
+          if (g.rounds < 0) g.rounds = g.model.chambers;
+          g.hammerTo = 1;
+          g.cylinderTo += (Math.PI * 2) / g.model.chambers;
+          if (g === held) this.onReady?.();
+        }
+      }
     }
     if (this.hang >= 0) {
-      this.pistol.cock.rotation.x += (-0.25 - this.pistol.cock.rotation.x) * Math.min(1, dt * 60);
       this.hang -= dt;
       if (this.hang < 0) {
         this.kick = 1;
@@ -204,15 +244,11 @@ export class Weapons {
         this.flashLight.intensity = 4;
         camera.updateMatrixWorld();
         this.root.updateMatrixWorld(true);
-        const muzzle = this.pistol.muzzle.getWorldPosition(new THREE.Vector3());
+        const muzzle = this.guns[this.firing].model.muzzle.getWorldPosition(new THREE.Vector3());
         // the ball goes where the dot is: toward the point 60 m down the line of sight
         const aim = new THREE.Vector3(0, 0, -60).applyMatrix4(camera.matrixWorld);
         this.onPistol?.(muzzle, aim.sub(muzzle).normalize());
       }
-    } else if (this.held === 'pistol' && this.reload <= 0 && this.pistol.cock.rotation.x < 0.5) {
-      // loaded and primed again: the cock is drawn back with a click
-      this.pistol.cock.rotation.x = 0.55;
-      this.onReady?.();
     }
     // the flash lasts a couple of frames
     if (this.kick < 0.75) { this.flash.visible = false; this.flashLight.intensity = 0; }
@@ -238,7 +274,7 @@ export class Weapons {
 
     // ---- pose ----
     const p = new THREE.Vector3(), q = new THREE.Quaternion();
-    if (this.held === 'pistol') {
+    if (isGun(this.held)) {
       p.copy(PISTOL_REST.p);
       q.setFromEuler(PISTOL_REST.r);
       // recoil: the muzzle flips up and the hand comes back, then settles
@@ -248,7 +284,7 @@ export class Weapons {
       q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.55 * k, 0, 0.1 * k)));
     } else if (this.held === 'rapier') {
       this.rapierPose(p, q);
-    } else if (this.held === 'lantern') {
+    } else if (isLamp(this.held)) {
       // Ctrl held: lift it up and out in front
       const up = !lowered && (input.isDown('ControlLeft') || input.isDown('ControlRight') || input.lmb);
       this.lift += ((up ? 1 : 0) - this.lift) * (1 - Math.exp(-dt * 6));
@@ -263,9 +299,11 @@ export class Weapons {
     q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.9 * d * d, 0, 0)));
     p.x += this.swayX + Math.sin(this.bobPhase) * 0.007 * this.bob;
     p.y += this.swayY - Math.abs(Math.cos(this.bobPhase)) * 0.009 * this.bob;
-    const held = this.held === 'pistol' ? this.pistol.group : this.held === 'rapier' ? this.rapier.group : this.lantern.group;
-    held.position.copy(p);
-    held.quaternion.copy(q);
+    if (this.held !== 'none') {
+      const held = this.groupOf(this.held);
+      held.position.copy(p);
+      held.quaternion.copy(q);
+    }
 
     // ---- the overlay follows the camera; its light is the sun's ----
     this.root.position.copy(camera.position);
@@ -286,14 +324,14 @@ export class Weapons {
     this.updateLight();
 
     // ---- HUD: the aiming dot (amber while loading), the slots ----
-    this.dot.hidden = !(this.held === 'pistol' && this.draw > 0.9);
-    this.dot.classList.toggle('loading', this.reload > 0);
+    this.dot.hidden = !(held && this.draw > 0.9);
+    this.dot.classList.toggle('loading', !!held && held.hammerTo < 1);
     this.slots.hidden = false;
     for (const el of this.slots.children) (el as HTMLElement).classList.toggle('on', (el as HTMLElement).dataset.w === this.weapon);
   }
 
   private gripOf(w: Exclude<Weapon, 'none'>): THREE.Object3D {
-    return w === 'pistol' ? this.pistol.grip : w === 'rapier' ? this.rapier.grip : this.lantern.grip;
+    return isGun(w) ? this.guns[w].model.grip : w === 'rapier' ? this.rapier.grip : this.lamps[w].grip;
   }
 
   /** the slots bar also shows the spyglass slot as active */
@@ -316,23 +354,27 @@ export class Weapons {
     this.swingV.y += (-g * this.swing.y - 2.2 * this.swingV.y + push.y) * dt;
     this.swing.addScaledVector(this.swingV, dt);
     this.swing.clampScalar(-0.6, 0.6);
-    this.lantern.body.rotation.set(this.swing.y, 0, this.swing.x);
+    for (const l of Object.values(this.lamps)) l.body.rotation.set(this.swing.y, 0, this.swing.x);
   }
 
-  /** the flame flickers; its light follows it in the world and warms the hand */
+  /** the flame flickers; its light follows it in the world, in its own colour and reach, and warms the hand */
   private updateLight(): void {
-    const on = this.held === 'lantern' ? this.draw : 0;
+    const lamp = isLamp(this.held) ? this.lamps[this.held] : null;
+    const on = lamp ? this.draw : 0;
     const t = this.time;
     const flicker = 0.86 + 0.08 * Math.sin(t * 11.3) + 0.05 * Math.sin(t * 23.7 + 1.3) + 0.03 * Math.sin(t * 41.1);
-    // (bright enough to light the deck round about and the rail across it; falls off as the square of distance)
-    this.worldLight.intensity = 42 * on * flicker;
+    // (the lantern bright enough to light the deck round about and the rail across it; falls off as the square
+    //  of distance)
+    this.worldLight.intensity = (lamp?.light.intensity ?? 0) * on * flicker;
     this.handLight.intensity = 0.35 * on * flicker;
-    this.lantern.glass.emissiveIntensity = 0.3 * flicker;
-    this.lantern.flame.scale.set(1, 0.85 + 0.3 * (flicker - 0.86) / 0.16, 1);
-    if (on > 0) {
-      this.root.updateMatrixWorld(true);
-      this.lantern.flame.getWorldPosition(this.worldLight.position);
-    }
+    if (!lamp) return;
+    this.worldLight.color.copy(lamp.light.color);
+    this.worldLight.distance = lamp.light.distance;
+    this.handLight.color.copy(lamp.light.color);
+    if (this.handLight.parent !== lamp.flame) lamp.flame.add(this.handLight);
+    for (const m of lamp.glow) m.emissiveIntensity = lamp.glowBase * flicker;
+    this.root.updateMatrixWorld(true);
+    lamp.flame.getWorldPosition(this.worldLight.position);
   }
 
   private rapierPose(p: THREE.Vector3, q: THREE.Quaternion): void {

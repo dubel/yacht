@@ -135,6 +135,12 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
   licencja **CC-BY-4.0**. W repo wersja zoptymalizowana (`public/assets/boats/jollyboat.glb`, 12,7 MB → 0,5 MB); oryginał w `assets/` (`npm run optimize-jollyboat`).
 - **Ręce (FPP)**: „Hands model rigged” — SomeOne34321, [Sketchfab](https://sketchfab.com/3d-models/hands-model-rigged-cbefd9fe847541dd8192e3281adf1bce),
   licencja **CC-BY-4.0**. W repo wersja zoptymalizowana (`public/assets/fpv/hands.glb`, 11 MB → 0,2 MB); oryginał w `assets/` (`npm run optimize-hands`).
+- **Broń i latarnie (FPP)**, licencja **CC-BY-4.0**, wersje zoptymalizowane w `public/assets/fpv/` (`npm run optimize-weapons`; oryginały w `assets/`):
+  „Flintlock Colonial Pistol (2019)” — inciprocal ([Sketchfab](https://sketchfab.com/3d-models/flintlock-colonial-pistol-2019-free-80c06fd527ba43e38ffa899ab2a7d00b)),
+  „Revolver” — barmatunishka ([Sketchfab](https://sketchfab.com/3d-models/revolver-68f58d1af9b24486a63dcf29d0fc0cbc)),
+  „Spanish Rapier” — Lathander ([Sketchfab](https://sketchfab.com/3d-models/spanish-rapier-ea35c67a680747faade209a8b4d66fc6)),
+  „Metal hanging lantern” — Irina.Tuchna ([Sketchfab](https://sketchfab.com/3d-models/metal-hanging-lantern-1bdbe7ea2e5242948f6cd7cccfd7206e)),
+  „Skull lantern” — brendan wood ([Sketchfab](https://sketchfab.com/3d-models/skull-lantern-492e96b19abc41aeb28d1114a23684ff)).
 - **Clearwater** — © 2026 Lumaris (Aurélien), licencja **MIT** (`third_party/clearwater/LICENSE`).
   Z Clearwatera pochodzą: spektrum i GPU FFT, symulacja ripples, kaustyki z dyspersją, model optyczny wody
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing

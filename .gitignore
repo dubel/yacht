@@ -8,3 +8,10 @@ assets/swedish_royal_yacht_amadis.glb
 assets/wooden_boat.glb
 # source FPS hands model (11 MB) — the game uses public/assets/fpv/hands.glb (npm run optimize-hands)
 assets/hands_model_rigged.glb
+# source weapon and lantern models — the game uses public/assets/fpv (npm run optimize-weapons)
+assets/revolver.glb
+assets/spanish_rapier.glb
+assets/lantern.glb
+assets/flintlock_colonial_pistol_2019__free.glb
+assets/metal_hanging_lantern.glb
+assets/skull_lantern.glb

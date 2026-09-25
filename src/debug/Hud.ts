@@ -19,7 +19,7 @@ export class Hud {
       '<kbd>F</kbd> na pokład (FPP): <kbd>WASD</kbd> chodzenie, <kbd>Shift</kbd> bieg, <kbd>Spacja</kbd> skok, mysz: rozglądanie, <kbd>←</kbd>/<kbd>→</kbd> ster',
       '&nbsp;&nbsp;&nbsp;&nbsp;luneta: prawy przycisk myszy (przytrzymaj) lub <kbd>L</kbd>, kółko: przybliżenie &nbsp; <kbd>X</kbd> żagle',
       'działa: <kbd>Ctrl</kbd> lewy / prawy — salwa z lewej / prawej burty; na pokładzie <kbd>Ctrl</kbd> przy dziale — obsadź',
-      'na pokładzie: <kbd>1</kbd> pistolet, <kbd>2</kbd> rapier, <kbd>3</kbd> latarnia, <kbd>0</kbd> luneta — <kbd>Ctrl</kbd> / lewy przycisk: strzał / cięcie / unieś latarnię',
+      'na pokładzie: <kbd>1</kbd> pistolet, <kbd>2</kbd> rapier, <kbd>3</kbd> latarnia, <kbd>7</kbd> rewolwer, <kbd>8</kbd> mroczna latarnia, <kbd>0</kbd> luneta — <kbd>Ctrl</kbd> / lewy przycisk: strzał / cięcie / unieś latarnię',
       '<kbd>Z</kbd> rzuć / podnieś kotwicę (przy brzegu, 3–28 m wody) &nbsp; na kotwicy: <kbd>B</kbd> szalupą na ląd i z powrotem',
       'na mieliźnie: <kbd>K</kbd> — wywieźć kotwicę i ściągnąć statek (kedżowanie)',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
