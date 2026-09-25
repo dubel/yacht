@@ -41,6 +41,8 @@ import { Hotbar } from '../ui/Hotbar';
 import { ItemIcons } from '../ui/ItemIcons';
 import { InventoryUI } from '../ui/InventoryUI';
 import { Status } from '../ui/Status';
+import { Vomit } from '../fpv/Vomit';
+import { OFF } from '../boat/DeckMap';
 import { SkullIsland } from '../world/SkullIsland';
 import { resetWorldState } from '../gameplay/worldState';
 import { SKULL_ISLAND } from '../world/WorldGen';
@@ -117,9 +119,13 @@ export class Game {
   /** game hours on the clock last frame (the island's respawn clock runs on game time) */
   private lastHours = 0;
   private dead = false;
-  /** rum in him: 0 sober … 1 roaring drunk (more still is stored up, and takes longer to wear off) */
+  /** rum in him, in swigs (a bottle holds 8); one wears off in some 22 s */
   drunk = 0;
   private hicT = 10;
+  /** too much rum coming back up; when the next fit is due (s, game time; Infinity: none), the last one */
+  vomit!: Vomit;
+  private vomitAt = Infinity;
+  private lastVomit = -1e9;
   private readonly hurtEl = Object.assign(document.createElement('div'), { id: 'hurt' });
   private revealT = 0;
   readonly spyglass = new Spyglass();
@@ -265,6 +271,22 @@ export class Game {
     // what the sailor carries: pistol and rapier, drawn over everything
     this.pipeline.overlay = this.weapons.overlay;
     await this.weapons.load();
+    // throwing up: the fit's sounds, the splats, where the stuff lands (the deck under it, the ground, the sea)
+    this.vomit = new Vomit({
+      sound: (k) => { this.audio.retch(k); if (k === 'gush') this.messages.say('Rum wraca tą samą drogą…', 3); },
+      splat: (at, big) => { const h = this.heardFrom(at.x, at.z); this.audio.splat(h.pan, Math.hypot(h.d, at.y - this.cam.camera.position.y), big); },
+      floor: (x, z) => {
+        if (this.onDeck) {
+          const root = this.boat.root, l = root.worldToLocal(new THREE.Vector3(x, this.cam.camera.position.y, z)), f = this.deck.at(l.x, l.z);
+          // (over the side: down into the sea)
+          if (f === OFF) return { y: -0.3, deck: false };
+          return { y: root.localToWorld(l.setY(f)).y, deck: true };
+        }
+        return { y: terrainHeight(x, z), deck: false };
+      },
+    }, this.boat.root);
+    this.scene.add(this.vomit.group);
+    this.boat.root.add(this.vomit.deckGroup);
     this.scene.add(this.weapons.worldLight);
     this.musketry = new Musketry(this.deck, this.boat.root);
     this.scene.add(this.musketry.mesh);
@@ -273,7 +295,13 @@ export class Game {
     // the rum: a swig, its gulps, the head swimming the more for each; an empty bottle filled from the ship's cask
     this.weapons.onSwig = () => this.audio.swig();
     this.weapons.onGulp = () => this.audio.gulp();
-    this.weapons.onDrunk = () => { this.drunk = Math.min(1.6, this.drunk + 0.17); };
+    this.weapons.onDrunk = () => {
+      this.drunk = Math.min(11, this.drunk + 1);
+      // from the second swig on, the rum may not stay down (not more than once in a while)
+      const chance = this.drunk >= 3 ? 0.5 : this.drunk >= 1.8 ? 0.3 : 0;
+      if (this.fpv && !this.vomit.active && this.vomitAt === Infinity && this.time - this.lastVomit > 25 && Math.random() < chance)
+        this.vomitAt = this.time + 1 + Math.random() * 1.5;
+    };
     this.weapons.onEmpty = () => {
       if (this.onDeck) { this.messages.say('Napełniasz flaszkę rumem z beczki w ładowni.', 3); return true; }
       this.messages.say('Pusta flaszka. Napełnisz ją na statku.', 3);
@@ -644,7 +672,7 @@ export class Game {
         this.land.tremor = sg.tremor();
         this.land.update(dt, this.input, this.cam.camera);
         const L = this.env.light;
-        this.weapons.update(dt, this.input, this.cam.camera, this.land.stride, sg.raise > 0.08 || this.map.open || this.chest.open,
+        this.weapons.update(dt, this.input, this.cam.camera, this.land.stride, sg.raise > 0.08 || this.map.open || this.chest.open || this.vomit.active,
           this.env.lightDir, L.color, L.intensity, this.scene.environment);
         this.markSlots(sg.raise > 0.3);
         this.nearGun = -1;
@@ -659,7 +687,7 @@ export class Game {
         this.walker.update(dt, this.input, this.boat.root, this.cam.camera);
         // what is in hand: follows the view, fires / cuts on Ctrl
         const L = this.env.light;
-        this.weapons.update(dt, this.input, this.cam.camera, this.walker.stride, sg.raise > 0.08 || this.map.open || this.chest.open,
+        this.weapons.update(dt, this.input, this.cam.camera, this.walker.stride, sg.raise > 0.08 || this.map.open || this.chest.open || this.vomit.active,
           this.env.lightDir, L.color, L.intensity, this.scene.environment);
         this.markSlots(sg.raise > 0.3);
         // walking past a gun (empty-handed): it lights up, Ctrl mans it
@@ -837,25 +865,49 @@ export class Game {
   }
 
   /**
-   * Rum: it wears off slowly (a full load in some three minutes). While it lasts the head swims — the view
-   * drifts, nods and rolls in slow, uneven swells — his feet wander off the line he means to walk, the picture
-   * doubles and warms (the post pass), and now and then a hiccup.
+   * Rum: every swig adds to it, and it wears off a swig in some 22 s. Its hold grows exponentially — a swig or
+   * two is a warm glow, the fourth and fifth start the world swimming, six is roaring drunk — and past a
+   * whole bottle it becomes a trip: colours split into rainbows and drift, the picture swirls and breathes,
+   * and the head sways hard. While it lasts the view drifts, nods and rolls in slow, uneven swells, his feet
+   * wander off the line he means to walk, the picture doubles and warms (the post pass), now and then a hiccup.
    */
   private updateDrunk(dt: number, t: number): void {
-    this.drunk = Math.max(0, this.drunk - dt / 180);
-    const d = Math.min(1, this.drunk), w = d * d * (3 - 2 * d);
+    this.drunk = Math.max(0, this.drunk - dt / 22);
+    const s = this.drunk;
+    // (e^{0.5 s} − 1) / (e^3 − 1): 1 swig 0.03, 2 0.09, 3 0.18, 4 0.33, 5 0.58, 6 1
+    const w = Math.min(1, (Math.exp(0.5 * s) - 1) / (Math.exp(3) - 1));
+    const trip = THREE.MathUtils.smoothstep(s, 5.5, 7.2);
+    const big = w * (1 + 1.8 * trip);
     const sway = {
-      yaw: w * (0.05 * Math.sin(t * 0.53) + 0.02 * Math.sin(t * 1.37 + 2)),
-      pitch: w * (0.035 * Math.sin(t * 0.71 + 1) + 0.015 * Math.sin(t * 1.9)),
-      roll: w * (0.1 * Math.sin(t * 0.43) + 0.035 * Math.sin(t * 1.13 + 0.5)),
+      yaw: big * (0.05 * Math.sin(t * 0.53) + 0.02 * Math.sin(t * 1.37 + 2)),
+      pitch: big * (0.035 * Math.sin(t * 0.71 + 1) + 0.015 * Math.sin(t * 1.9)),
+      roll: big * (0.1 * Math.sin(t * 0.43) + 0.035 * Math.sin(t * 1.13 + 0.5)) + trip * 0.12 * Math.sin(t * 0.27),
     };
+    const d = w;
+    // throwing up: the head nods with the heaves and bends right down for the rest
+    if (this.vomitAt <= this.time && this.fpv) { this.vomitAt = Infinity; this.lastVomit = this.time; this.vomit.start(); }
+    if (!this.fpv) this.vomitAt = Infinity;
+    const head = this.vomit.head(t);
+    sway.pitch += head.pitch;
+    sway.yaw += head.shake;
+    sway.roll += head.shake * 0.5;
+    const cam = this.cam.camera, ahead = cam.getWorldDirection(new THREE.Vector3());
+    const flat = new THREE.Vector3(ahead.x, 0, ahead.z).normalize();
+    const was = this.vomit.active;
+    this.vomit.update(dt, cam.position.clone().addScaledVector(flat, 0.12).add(new THREE.Vector3(0, -0.1, 0)), ahead);
+    // (it sobers him, a little)
+    if (was && !this.vomit.active) this.drunk = Math.max(0, this.drunk - 1.5);
     this.walker.sway = sway;
     this.land.sway = sway;
     // the feet go their own way: the heading wanders while he walks
-    const drift = w * 0.35 * (Math.sin(t * 0.31) + 0.6 * Math.sin(t * 0.83 + 1.7)) * dt;
+    const drift = big * 0.35 * (Math.sin(t * 0.31) + 0.6 * Math.sin(t * 0.83 + 1.7)) * dt;
     if (this.onDeck) this.walker.yaw += drift * Math.min(1, this.walker.pace * 3 + 0.2);
     else if (this.ashore) this.land.yaw += drift * Math.min(1, this.land.pace * 3 + 0.2);
     this.pipeline.post.drunk = w;
+    this.pipeline.post.trip = trip;
+    // …and in the music
+    const actx = this.audio.context;
+    if (actx) { this.music.attach(actx); this.music.setTrip(w, trip); }
     this.hicT -= dt;
     if (this.hicT <= 0) {
       this.hicT = 6 + Math.random() * 14;

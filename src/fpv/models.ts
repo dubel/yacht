@@ -352,7 +352,9 @@ export async function makeRum(): Promise<RumBottle> {
   rum.renderOrder = -1;
   group.add(rum);
   // held round the body, the index finger up by the shoulder, the palm on its right
-  const grip = gripFrame(toGroup(new THREE.Vector3(0.04, -0.12, 0)), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0));
+  // (the palm on the flask's narrow side, turned a little toward its back: the fingers reach round it)
+  const pa = -0.3;
+  const grip = gripFrame(toGroup(new THREE.Vector3(0, -0.12, 0)), new THREE.Vector3(0, 1, 0), new THREE.Vector3(Math.cos(pa), 0, Math.sin(pa)));
   group.add(grip);
   const q = new THREE.Quaternion(), ax = new THREE.Vector3(), half = [W / 2, H / 2, D / 2].map((v) => v * s);
   return {

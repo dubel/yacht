@@ -6,6 +6,11 @@
  * a wall. A change of mood that lasts a few seconds fades the piece out and brings in one that fits (storm
  * and the capstan come in at once). Pieces stream (HTML audio), so nothing is downloaded before it plays.
  * F7 turns it off and on (remembered); M silences it with everything else.
+ *
+ * Once sound has started the pieces play through WebAudio (TripFx), so rum can get into the music too: a
+ * little drunk, the pitch starts to swim; past a whole bottle, in the rainbow, it turns into a record from
+ * 1967 — a jet-plane flanger sweeping through it, a long echo trailing behind, the high end breathing in and
+ * out with the picture.
  */
 
 export type Mood = 'calm' | 'dusk' | 'voyage' | 'storm' | 'haul';
@@ -23,7 +28,7 @@ const GAP: Record<Mood, [number, number]> = { calm: [8, 20], dusk: [10, 24], voy
 
 export const MUSIC_NAMES: Record<Mood, string> = { calm: 'spokój', dusk: 'zmierzch', voyage: 'wyprawa', storm: 'sztorm', haul: 'kabestan' };
 
-interface Playing { el: HTMLAudioElement; mood: Mood; vol: number }
+interface Playing { el: HTMLAudioElement; mood: Mood; vol: number; gain?: GainNode }
 
 export class Music {
   enabled = (() => { try { return localStorage.getItem('lagoon.music') !== 'off'; } catch { return true; } })();
@@ -40,7 +45,38 @@ export class Music {
   private duckT = 0;
   private duck = 1;
 
+  private fx: TripFx | null = null;
+
   constructor(private readonly base = 'assets/music/') {}
+
+  /** once sound has started: the pieces through WebAudio, and the rum's effects on them */
+  attach(ctx: AudioContext): void {
+    if (this.fx) return;
+    this.fx = new TripFx(ctx);
+    for (const p of [this.playing, ...this.fading]) if (p) this.route(p);
+  }
+
+  /** how drunk (0–1) and how far into the trip (0–1) he is: the music follows */
+  setTrip(drunk: number, trip: number): void {
+    this.fx?.set(drunk, trip);
+  }
+
+  /** a piece's volume: on its gain in the graph once routed (the element's own volume left at 1) */
+  private setVol(p: Playing, v: number): void {
+    if (p.gain) p.gain.gain.value = v;
+    else p.el.volume = v;
+  }
+
+  private route(p: Playing): void {
+    if (!this.fx || p.gain) return;
+    try {
+      const src = this.fx.ctx.createMediaElementSource(p.el);
+      p.gain = this.fx.ctx.createGain();
+      p.gain.gain.value = p.el.volume;
+      p.el.volume = 1;
+      src.connect(p.gain).connect(this.fx.input);
+    } catch { /* (already routed, or not allowed): it plays as it is */ }
+  }
 
   /** F7 */
   toggle(): boolean {
@@ -70,7 +106,7 @@ export class Music {
     for (let i = this.fading.length - 1; i >= 0; i--) {
       const f = this.fading[i];
       f.vol = Math.max(0, f.vol - dt / 3);
-      f.el.volume = muted ? 0 : f.vol * LEVEL[f.mood] * this.duck;
+      this.setVol(f, muted ? 0 : f.vol * LEVEL[f.mood] * this.duck);
       if (f.vol <= 0) { f.el.pause(); f.el.src = ''; this.fading.splice(i, 1); }
     }
     if (!ready || !this.enabled) return;
@@ -92,7 +128,7 @@ export class Music {
     const p = this.playing;
     if (p) {
       p.vol = Math.min(1, p.vol + dt / 2.5);
-      p.el.volume = muted ? 0 : p.vol * LEVEL[p.mood] * this.duck;
+      this.setVol(p, muted ? 0 : p.vol * LEVEL[p.mood] * this.duck);
       if (p.el.ended) {
         this.playing = null;
         const [a, b] = GAP[mood];
@@ -122,6 +158,7 @@ export class Music {
     el.loop = mood === 'haul';
     el.play().catch(() => { /* not allowed yet: try again later */ this.playing = null; this.wait = 2; });
     this.playing = { el, mood, vol: 0 };
+    this.route(this.playing);
   }
 
   private fadeOut(): void {
@@ -133,5 +170,79 @@ export class Music {
   private stop(): void {
     this.fadeOut();
     this.mood = null;
+  }
+}
+
+/**
+ * The rum in the music. Everything goes through a short delay whose length an LFO sways — the pitch
+ * wobbling, a little drunk, a lot in the trip. In the trip a wet path is mixed in: a flanger (a very short
+ * delay, slowly swept, fed back on itself — the "jet plane" of 1960s psychedelia), a long, dark echo, and a
+ * low-pass that opens and closes like breathing (in step with the picture's).
+ */
+class TripFx {
+  readonly input: GainNode;
+  private readonly vibDepth: GainNode;
+  private readonly dry: GainNode;
+  private readonly wet: GainNode;
+  private readonly echo: GainNode;
+  private readonly breath: GainNode;
+
+  constructor(readonly ctx: AudioContext) {
+    const c = ctx, lfo = (f: number) => { const o = c.createOscillator(); o.frequency.value = f; o.start(); return o; };
+    this.input = c.createGain();
+    // the swimming pitch: a 12 ms delay whose length swings (a Doppler wobble)
+    const vib = c.createDelay(0.1);
+    vib.delayTime.value = 0.012;
+    this.vibDepth = c.createGain();
+    this.vibDepth.gain.value = 0;
+    lfo(0.31).connect(this.vibDepth).connect(vib.delayTime);
+    const vib2 = c.createGain(); vib2.gain.value = 0.35;
+    lfo(0.83).connect(vib2).connect(this.vibDepth);
+    this.input.connect(vib);
+    const out = c.createGain();
+    out.connect(c.destination);
+    this.dry = c.createGain();
+    vib.connect(this.dry).connect(out);
+    // the flanger
+    const fl = c.createDelay(0.05);
+    fl.delayTime.value = 0.004;
+    const flDepth = c.createGain(); flDepth.gain.value = 0.0032;
+    lfo(0.16).connect(flDepth).connect(fl.delayTime);
+    const fb = c.createGain(); fb.gain.value = 0.62;
+    vib.connect(fl);
+    fl.connect(fb).connect(fl);
+    // the breathing low-pass over the wet path
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass'; lp.frequency.value = 5000; lp.Q.value = 4;
+    this.breath = c.createGain(); this.breath.gain.value = 0;
+    lfo(0.14).connect(this.breath).connect(lp.frequency);
+    const mix = c.createGain();
+    vib.connect(mix); fl.connect(mix);
+    mix.connect(lp);
+    this.wet = c.createGain(); this.wet.gain.value = 0;
+    lp.connect(this.wet).connect(out);
+    // the echo
+    const ed = c.createDelay(1.5); ed.delayTime.value = 0.43;
+    const efb = c.createGain(); efb.gain.value = 0.5;
+    const edark = c.createBiquadFilter(); edark.type = 'lowpass'; edark.frequency.value = 1800;
+    this.echo = c.createGain(); this.echo.gain.value = 0;
+    lp.connect(this.echo).connect(ed);
+    ed.connect(edark).connect(efb).connect(ed);
+    edark.connect(out);
+  }
+
+  private last = [-1, -1];
+
+  set(drunk: number, trip: number): void {
+    // (only when it has changed: each call queues automation on the params)
+    if (Math.abs(drunk - this.last[0]) < 0.01 && Math.abs(trip - this.last[1]) < 0.01) return;
+    this.last = [drunk, trip];
+    const t = this.ctx.currentTime, to = (p: AudioParam, v: number) => p.setTargetAtTime(v, t, 0.4);
+    // (seconds of delay swing: 1.5 ms is a gentle drunken warble, 7 ms a seasick one)
+    to(this.vibDepth.gain, 0.0015 * drunk + 0.0055 * trip);
+    to(this.dry.gain, 1 - 0.55 * trip);
+    to(this.wet.gain, 0.95 * trip);
+    to(this.echo.gain, 0.55 * trip);
+    to(this.breath.gain, 4200 * trip);
   }
 }

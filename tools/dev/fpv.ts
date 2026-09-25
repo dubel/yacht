@@ -85,4 +85,26 @@ if (close) {
   const hr = w.hands.root, a = hr.getObjectByName('Bone018_end_041')!.getWorldPosition(new THREE.Vector3()), b = hr.getObjectByName('Bone020_024')!.getWorldPosition(new THREE.Vector3());
   console.log('wristGap', a.distanceTo(b).toFixed(4)); }
 renderer.render(w.overlay, view);
+(window as unknown as { __w: unknown }).__w = w;
+// how many of the hand's vertices lie inside the rum flask's body (in its own frame), and how many touch it
+(window as unknown as { __inside: () => string }).__inside = () => {
+  const bottle = (w as unknown as { rum: { group: THREE.Object3D } }).rum.group;
+  bottle.updateWorldMatrix(true, true);
+  const inv = bottle.matrixWorld.clone().invert(), v = new THREE.Vector3();
+  let inside = 0, near = 0, n = 0;
+  w.hands.root.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh) return;
+    const count = m.geometry.getAttribute('position').count;
+    for (let i = 0; i < count; i += 3) {
+      m.getVertexPosition(i, v); v.applyMatrix4(m.matrixWorld).applyMatrix4(inv);
+      if (v.y < -0.259 || v.y > -0.085) continue;
+      n++;
+      const dx = 0.047 - Math.abs(v.x), dz = 0.039 - Math.abs(v.z);
+      if (dx > 0.003 && dz > 0.003) inside++;
+      else if (dx > -0.006 && dz > -0.006) near++;
+    }
+  });
+  return inside + ' inside, ' + near + ' touching (of ' + n + ' at its height)';
+};
 (window as unknown as { __ready: boolean }).__ready = true;

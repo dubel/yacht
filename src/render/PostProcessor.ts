@@ -13,6 +13,8 @@ export class PostProcessor {
   scope = 0;
   /** 0 sober … 1 roaring drunk: the picture swims, doubles and warms */
   drunk = 0;
+  /** 0 … 1 past a whole bottle: rainbows, colours adrift, the picture swirling and breathing */
+  trip = 0;
   /** lens radius as a fraction of the shorter screen side (at full raise) */
   scopeR = 0.44;
   private qA!: THREE.WebGLRenderTarget;
@@ -53,7 +55,7 @@ uniform sampler2D uSrc; uniform float uK;
 void main(){ o = vec4(texture(uSrc,vUv).rgb*uK, 1); }`, { uSrc: { value: null }, uK: { value: 1 } });
 
     this.final = passMaterial(/* glsl */ `
-uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden, uScope, uScopeR, uAspect, uDrunk;
+uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden, uScope, uScopeR, uAspect, uDrunk, uTrip;
 vec3 bicubic(sampler2D t, vec2 uv){
   vec2 ts = vec2(textureSize(t,0)); vec2 p = uv*ts - 0.5; vec2 f = fract(p); p = floor(p);
   vec2 w0 = f*(-0.5+f*(1.0-0.5*f)), w1 = 1.0+f*f*(-2.5+1.5*f), w2 = f*(0.5+f*(2.0-1.5*f)), w3 = f*f*(-0.5+0.5*f);
@@ -74,6 +76,15 @@ void main(){
     float k = 0.07*raise;
     uv = 0.5 + (sp*(1.0 - k + k*sr*sr))/vec2(uAspect, 1.0);
   }
+  // a trip: the picture breathes (zooming in and out) and swirls round the middle, more toward the edges
+  if (uTrip > 0.001) {
+    vec2 e = (uv - 0.5)*vec2(uAspect, 1.0);
+    float r = length(e);
+    float ang = uTrip*(0.25*sin(uTime*0.37) + 0.35*r*sin(r*7.0 - uTime*1.1));
+    e = mat2(cos(ang), -sin(ang), sin(ang), cos(ang))*e;
+    e *= 1.0 + uTrip*0.06*sin(uTime*0.9);
+    uv = 0.5 + e/vec2(uAspect, 1.0);
+  }
   // drunk: the picture swims — a slow wobble through it, stronger toward the edges
   if (uDrunk > 0.001) {
     vec2 e = uv - 0.5;
@@ -88,6 +99,13 @@ void main(){
     vec2 off = uDrunk*0.022*pull*vec2(cos(uTime*0.41), 0.45*sin(uTime*0.29));
     vec3 ghost = texture(uHdr, uv + off).rgb;
     c = mix(c, ghost, 0.45*min(1.0, uDrunk*1.6));
+  }
+  // a trip: every edge split into a rainbow (the three colours pulled apart, turning), a third image
+  if (uTrip > 0.001) {
+    vec2 dir = uTrip*0.016*vec2(cos(uTime*0.6), sin(uTime*0.6));
+    vec3 split = vec3(texture(uHdr, uv + dir).r, texture(uHdr, uv + dir*0.5*vec2(-1.0, 1.0)).g, texture(uHdr, uv - dir).b);
+    c = mix(c, split, 0.7*uTrip);
+    c = mix(c, texture(uHdr, uv - vec2(0.03, -0.012)*uTrip*sin(uTime*0.45)).rgb, 0.25*uTrip);
   }
   float bloom = 0.035 + 0.05*uGolden;
   c += texture(uB1, uv).rgb * bloom + bicubic(uB2, uv) * bloom;
@@ -107,6 +125,18 @@ void main(){
   // drunk: the edges of sight close in, the world gone warm and golden
   c *= 1.0 - uDrunk*0.55*smoothstep(0.1, 0.55, dot(cc, cc)*2.2);
   c *= mix(vec3(1.0), vec3(1.1, 1.0, 0.82), uDrunk*0.8);
+  // a trip: the colours drift round the wheel, bands of rainbow washing across the picture
+  if (uTrip > 0.001) {
+    float band = uv.x*2.3 + uv.y*1.7 + uTime*0.25 + 0.4*sin(uv.y*9.0 + uTime*0.7);
+    vec3 rainbow = 0.5 + 0.5*cos(6.2832*(band + vec3(0.0, 0.33, 0.67)));
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    // turn the hue (a rotation about the grey axis), then lay the rainbow over it by the light
+    float hr = uTrip*1.6*sin(uTime*0.21);
+    vec3 k = vec3(0.57735);
+    c = c*cos(hr) + cross(k, c)*sin(hr) + k*dot(k, c)*(1.0 - cos(hr));
+    c = mix(c, rainbow*(l*1.4 + 0.05), 0.24*uTrip);
+    c = mix(vec3(l), c, 1.0 + 0.6*uTrip);
+  }
   c = aces(c);
   float lum = dot(c, vec3(0.2126,0.7152,0.0722));
   c = mix(vec3(lum), c, 0.93);
@@ -115,7 +145,7 @@ void main(){
   float g = hash(gl_FragCoord.xy + fract(uTime*7.13)*917.0) - 0.5;
   c += g * 0.014 * (1.0 - c*0.6);
   o = vec4(c, 1);
-}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 }, uDrunk: { value: 0 },
+}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 }, uDrunk: { value: 0 }, uTrip: { value: 0 },
       uScope: { value: 0 }, uScopeR: { value: 0.44 }, uAspect: { value: 1 } });
   }
 
@@ -143,7 +173,7 @@ void main(){
     }
     const f = this.final.uniforms;
     f.uHdr.value = hdr; f.uB1.value = this.b1.texture; f.uB2.value = this.b2.texture;
-    f.uExp.value = this.exposure; f.uTime.value = time; f.uGolden.value = this.golden; f.uDrunk.value = this.drunk;
+    f.uExp.value = this.exposure; f.uTime.value = time; f.uGolden.value = this.golden; f.uDrunk.value = this.drunk; f.uTrip.value = this.trip;
     f.uScope.value = this.scope; f.uScopeR.value = this.scopeR;
     f.uAspect.value = this.qA.width / Math.max(1, this.qA.height);
     blit.run(this.final, null);

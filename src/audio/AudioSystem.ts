@@ -80,6 +80,8 @@ export class AudioSystem {
   }
 
   get started(): boolean { return !!this.ctx; }
+  /** the audio context, once sound has started (the music routes through it for its effects) */
+  get context(): AudioContext | null { return this.ctx; }
 
   toggleMute(): void {
     this.muted = !this.muted;
@@ -508,6 +510,75 @@ export class AudioSystem {
     }
     g.connect(this.muffle);
     o.start(t); o.stop(t + len + 0.05);
+  }
+
+  /**
+   * Throwing up. `heave`: a dry retch — the throat closing on a strangled, falling "hurk" (a buzz through the
+   * vowel of it) over a thump from the gut. `gush`: the real thing — a long, rough, gargling bellow while the
+   * stuff pours out (a gurgle of low noise, the splash of it). `spit`: a last "ptuh" to clear the mouth.
+   */
+  retch(kind: 'heave' | 'gush' | 'spit'): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.01;
+    const out = ctx.createGain();
+    out.gain.value = 0.9;
+    out.connect(this.muffle);
+    const env = (node: AudioNode, at: number, peak: number, attack: number, hold: number, release: number) => {
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, at); g.gain.linearRampToValueAtTime(peak, at + attack);
+      g.gain.setValueAtTime(peak, at + attack + hold); g.gain.linearRampToValueAtTime(0, at + attack + hold + release);
+      node.connect(g);
+      return g;
+    };
+    const noise = (at: number, len: number) => { const n = ctx.createBufferSource(); n.buffer = this.noise; n.start(at, Math.random() * 2, len + 0.1); return n; };
+    const band = (f: number, q: number) => { const b = ctx.createBiquadFilter(); b.type = 'bandpass'; b.frequency.value = f; b.Q.value = q; return b; };
+    if (kind === 'spit') {
+      // the lips parting, and a spray
+      this.knock(t, 900, 2, 0.35, 0.012, 0.05);
+      env(noise(t + 0.02, 0.12).connect(band(3200, 1.2)), t + 0.02, 0.25, 0.005, 0.03, 0.07).connect(out);
+      return;
+    }
+    const len = kind === 'heave' ? 0.4 : 1.15;
+    // the voice: a rough buzz, its pitch falling, chopped by the throat's spasms
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    const f0 = kind === 'heave' ? 125 : 95;
+    o.frequency.setValueAtTime(f0 * 1.2, t);
+    o.frequency.exponentialRampToValueAtTime(f0 * 0.7, t + len);
+    const chop = ctx.createGain();
+    for (let k = 0, tt = t; tt < t + len; k++, tt += 0.028 + Math.random() * 0.025) chop.gain.setValueAtTime(Math.random() < 0.65 ? 1 : 0.2, tt);
+    o.connect(chop);
+    const throat = noise(t, len);
+    const tg = ctx.createGain(); tg.gain.value = 0.5;
+    throat.connect(tg).connect(chop);
+    // the vowel of it: "uh" closing ("hurk") or wide open ("bleurgh")
+    const vowel = ctx.createGain();
+    for (const [f, q, g] of (kind === 'heave' ? [[480, 6, 1], [1150, 7, 0.6], [2400, 8, 0.3]] : [[640, 5, 1], [1250, 6, 0.7], [2500, 7, 0.35]]) as [number, number, number][]) {
+      const b = band(f, q), gg = ctx.createGain(); gg.gain.value = g;
+      if (kind === 'heave') b.frequency.linearRampToValueAtTime(f * 0.75, t + len);
+      chop.connect(b).connect(gg).connect(vowel);
+    }
+    env(vowel, t, kind === 'heave' ? 0.55 : 0.5, 0.03, len * 0.55, len * 0.4).connect(out);
+    o.start(t); o.stop(t + len + 0.1);
+    // the gut: a low thump at the start of each
+    this.knock(t, 120, 1.5, 0.9, 0.08, 0);
+    if (kind === 'gush') {
+      // the stuff pouring: a low gurgle, and the splash of it
+      const g = noise(t + 0.08, len).connect(ctx.createBiquadFilter());
+      (g as BiquadFilterNode).type = 'lowpass'; (g as BiquadFilterNode).frequency.value = 850;
+      const am = ctx.createGain();
+      for (let k = 0, tt = t; tt < t + len; k++, tt += 0.06 + Math.random() * 0.05) am.gain.setValueAtTime(0.4 + Math.random() * 0.6, tt);
+      g.connect(am);
+      env(am, t + 0.08, 0.7, 0.05, len * 0.6, len * 0.35).connect(out);
+      this.play((['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)], 0.5, { rate: 0.55, lowpass: 1400, delay: 0.25 });
+    }
+  }
+
+  /** a blob of it landing: a wet slap */
+  splat(pan: number, distance: number, big: boolean): void {
+    const near = Math.min(1, 3 / (distance + 1));
+    this.play((['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)], (big ? 0.35 : 0.18) * near, { pan: pan * 0.6, rate: 0.6 + Math.random() * 0.2, lowpass: 1100 + 1200 * near });
   }
 
   /** the sailor cut: a dull blow, and his breath knocked out */
