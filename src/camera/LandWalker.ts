@@ -42,6 +42,8 @@ export class LandWalker {
   onJump: (() => void) | null = null;
   /** other things in the way (the boat drawn up on the beach): [x, z, r] */
   obstacles: [number, number, number][] = [];
+  /** more that stops him (the Skull Island's rock, its guards) */
+  blocked: ((x: number, z: number) => boolean) | null = null;
   /** walked into water deeper than he dares */
   onDeep: (() => void) | null = null;
 
@@ -76,6 +78,7 @@ export class LandWalker {
   private canMove(x: number, z: number): boolean {
     const g = terrainHeight(x, z);
     if (g < -WADE) { this.onDeep?.(); return false; }
+    if (this.blocked?.(x, z)) return false;
     const here = terrainHeight(this.pos.x, this.pos.y), run = Math.hypot(x - this.pos.x, z - this.pos.y);
     // uphill only where it isn't too steep (down, anything)
     return g - here <= CLIMB * run + 1e-4;

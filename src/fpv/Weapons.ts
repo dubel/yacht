@@ -67,6 +67,8 @@ export class Weapons {
   /** the hammer fell on the cap (sound); the shot follows `hang` s later */
   onPan: ((hang: number) => void) | null = null;
   onSlash: ((cut: number) => void) | null = null;
+  /** the blade is through the middle of its cut: whatever is in reach before him is struck now */
+  onCutHit: (() => void) | null = null;
   /** the hammer drawn back: ready to fire again */
   onReady: (() => void) | null = null;
   /** the models have loaded (nothing is drawn or used before) */
@@ -268,7 +270,9 @@ export class Weapons {
       this.onSlash?.(this.cut);
     }
     if (this.slashT >= 0) {
+      const was = this.slashT;
       this.slashT += dt / SLASH_TIME;
+      if (was < 0.42 && this.slashT >= 0.42) this.onCutHit?.();
       if (this.slashT >= 1) this.slashT = -1;
     }
 

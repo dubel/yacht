@@ -102,6 +102,12 @@ export class Anchor {
     if (this.group.visible) this.place();
   }
 
+  /** let go here and now, whatever the speed (for starting a game at anchor: ?location) */
+  dropNow(): void {
+    this.body.velocity.set(0, 0, 0);
+    this.letGo(false);
+  }
+
   private letGo(busy: boolean): void {
     const b = this.body, h = this.hooks.hawse(this.from);
     if (busy) { this.hooks.say('Najpierw zejdźmy z mielizny (K).', 3); return; }

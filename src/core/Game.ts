@@ -41,6 +41,8 @@ import { Hotbar } from '../ui/Hotbar';
 import { ItemIcons } from '../ui/ItemIcons';
 import { InventoryUI } from '../ui/InventoryUI';
 import { Status } from '../ui/Status';
+import { SkullIsland } from '../world/SkullIsland';
+import { SKULL_ISLAND } from '../world/WorldGen';
 import type { Weapon } from '../fpv/Weapons';
 import { Leadsman } from '../gameplay/Leadsman';
 import { Music, type Mood } from '../audio/Music';
@@ -109,6 +111,12 @@ export class Game {
   /** first person: on deck or ashore */
   get fpv(): boolean { return this.onDeck || this.ashore; }
   private deepSaid = -Infinity;
+  /** the Skull Island's cave, its guards and its gold */
+  skull!: SkullIsland;
+  /** game hours on the clock last frame (the island's respawn clock runs on game time) */
+  private lastHours = 0;
+  private dead = false;
+  private readonly hurtEl = Object.assign(document.createElement('div'), { id: 'hurt' });
   private revealT = 0;
   readonly spyglass = new Spyglass();
   guns!: Guns;
@@ -264,11 +272,35 @@ export class Game {
       this.artillery.pistolSmoke(muzzle, dir);
     };
     this.musketry.onHit = (kind, at) => {
-      this.artillery.chips(at, kind === 'ricochet' ? 'wood' : kind);
+      this.artillery.chips(at, kind === 'ricochet' ? 'wood' : kind === 'bone' ? 'land' : kind);
       if (kind === 'water') { this.splash.burst(at.x, at.y, at.z, 10, 3); this.ripples.disturb(at.x, at.z, 0.35, 0.04); }
+      // (a guard struck: the island sounds the bone itself)
+      if (kind === 'bone') return;
       const h = this.heardFrom(at.x, at.z);
       this.audio.bullet(kind, h.pan, Math.hypot(h.d, at.y - this.cam.camera.position.y));
     };
+    // the Skull Island: its rocks, torches, guards and gold
+    const sound = { boneHit: 'boneHit', collapse: 'collapse', rise: 'rise' } as const;
+    this.skull = new SkullIsland({
+      say: (text, sec) => this.messages.say(text, sec),
+      hurt: (k) => this.hurt(k),
+      gold: (n) => this.inventory.setDucats(this.inventory.ducats + n),
+      sound: (kind, at) => {
+        const h = this.heardFrom(at.x, at.z);
+        if (kind === 'swing') this.audio.swoosh(h.pan * 0.5);
+        else if (kind === 'coins') this.audio.coins();
+        else this.audio[sound[kind]](h.pan, h.d);
+      },
+    });
+    await this.skull.load();
+    this.scene.add(this.skull.group, ...this.skull.lights);
+    this.musketry.target = (a, b) => this.skull.shoot(a, b);
+    // the rapier through the middle of its cut: a guard in reach is struck
+    this.weapons.onCutHit = () => {
+      const cam = this.cam.camera, at = this.skull.cut(cam.position, cam.getWorldDirection(new THREE.Vector3()));
+      if (at) this.artillery.chips(at, 'land');
+    };
+    document.body.append(this.hurtEl);
     this.scene.add(this.artillery.balls);
     this.pipeline.late.add(this.artillery.late);
     // surf breaking on the reefs (the white line; a pass is the gap in it)
@@ -334,6 +366,7 @@ export class Game {
       hours: (h) => { this.clock.advance(h); this.clouds.skip(h * 3600, { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed }); },
     });
     this.land.obstacles = this.landing.obstacles;
+    this.land.blocked = (x, z) => this.skull.blocked(x, z);
     await this.landing.load('assets/boats/jollyboat.glb');
     this.scene.add(this.landing.group);
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
@@ -359,6 +392,8 @@ export class Game {
       this.audio.blow(h.pan, h.d);
     };
     this.map = new MapUI(this.discovery, Config.worldSeed);
+    if (Config.location === 'skull') this.startAtSkull();
+    this.lastHours = this.clock.day * 24 + this.clock.hours;
     progress(1);
 
     this.resize();
@@ -490,7 +525,12 @@ export class Game {
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.copy(this.env.fogColor);
     fog.density = this.env.fogDensity;
-    this.pipeline.post.exposure = this.env.exposure;
+    // in the Skull Island's passage: the sky's light shut out (the torches are what light it), the eye opening
+    const dark = this.skull?.dark ?? 0;
+    this.env.light.intensity *= 1 - 0.96 * dark;
+    this.scene.environmentIntensity = 1 - 0.93 * dark;
+    this.weatherFx.group.visible = !this.skull?.inside;
+    this.pipeline.post.exposure = this.env.exposure * (1 + 0.6 * dark);
     this.pipeline.post.golden = this.env.golden;
 
     // --- simulation ---
@@ -658,6 +698,13 @@ export class Game {
     });
 
     this.music.update(dt, this.musicMood(dt), this.audio.started, this.audio.muted);
+    {
+      // the island: its clock runs on game hours (a jump back doesn't turn it back)
+      const hours = this.clock.day * 24 + this.clock.hours;
+      const feet = this.ashore ? new THREE.Vector3(this.land.pos.x, this.land.footY, this.land.pos.y) : null;
+      this.skull.update(stepDt, feet, this.cam.camera.position, Math.max(0, hours - this.lastHours));
+      this.lastHours = hours;
+    }
     this.chest.update(dt);
     this.status.update(dt, this.ashore ? 0 : body.heel, this.onDeck ? this.walker.pace : this.ashore ? this.land.pace : 0);
     this.paintIcons(dt);
@@ -765,6 +812,51 @@ export class Game {
     this.input.wantLock = on;
     if (on) this.walker.spawn(this.boat.info.hullStern);
     else { this.input.unlock(); this.gunSight.exit(); this.weapons.stow(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+  }
+
+  /** cut by a guard: his life runs out of the tube; at nothing, he is dead */
+  private hurt(k: number): void {
+    if (this.dead) return;
+    this.inventory.setHealth(this.inventory.health - k);
+    this.audio.hurt();
+    this.hurtEl.classList.remove('on');
+    void this.hurtEl.offsetWidth;
+    this.hurtEl.classList.add('on');
+    if (this.inventory.health <= 0.001) this.die();
+  }
+
+  /** dead: the word in crimson over a grey veil; any key starts the game again from the beginning */
+  private die(): void {
+    this.dead = true;
+    this.weapons.stow();
+    this.input.suspended = true;
+    this.input.unlock();
+    const el = document.createElement('div');
+    el.id = 'death';
+    el.innerHTML = '<h1>Umarłeś</h1><p>naciśnij dowolny klawisz, by zrestartować grę</p>';
+    document.body.append(el);
+    requestAnimationFrame(() => el.classList.add('on'));
+    // (a moment's grace, so a key held in the fight doesn't restart at once)
+    setTimeout(() => {
+      const again = () => { this.inventory.reset(); this.skull.reset(); location.reload(); };
+      addEventListener('keydown', again, { once: true });
+      el.addEventListener('pointerdown', again, { once: true });
+    }, 1200);
+  }
+
+  /** ?location=skull: the ship at anchor off the Skull Island, the sailor ashore before the cave's mouth */
+  private startAtSkull(): void {
+    const body = this.physics;
+    body.reset(new THREE.Vector3(SKULL_ISLAND.x + 215, 0, SKULL_ISLAND.z + 10), THREE.MathUtils.degToRad(270), 0);
+    body.setSails(false);
+    body.sailsUp = 0;
+    body.applyVisuals(this.boat, 0);
+    this.boat.root.updateMatrixWorld(true);
+    this.anchor.dropNow();
+    if (this.landing.arriveNow(body.origin)) {
+      const a = this.skull.approach;
+      this.land.place(a.at.x, a.at.z, a.yaw);
+    }
   }
 
   /**

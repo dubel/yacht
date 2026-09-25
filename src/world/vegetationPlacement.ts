@@ -1,5 +1,5 @@
 import { fbm, smoothstep } from '../core/noise';
-import { terrainHeight } from './WorldGen';
+import { SKULL_ISLAND, terrainHeight } from './WorldGen';
 
 /*
  * Where plants grow (runs in the terrain worker): palms along the beaches, rounded jungle trees on the
@@ -32,6 +32,8 @@ export interface Plant { kind: number; x: number; z: number; h: number; s: numbe
 /** the plant (if any) of world grid cell (i, j) — the same wherever it is asked from */
 export function plantAt(i: number, j: number): Plant | null {
   const px = (i + hash(i, j, 1) - 0.5) * STEP, pz = (j + hash(i, j, 2) - 0.5) * STEP;
+  // (nothing grows on the Skull Island's plateau: its rocks and cave stand there)
+  if (Math.hypot(px - SKULL_ISLAND.x, pz - SKULL_ISLAND.z) < SKULL_ISLAND.flat!.r * 1.15) return null;
   const h = terrainHeight(px, pz);
   if (h < VEG_MIN_H) return null;
   const e = 0.8;

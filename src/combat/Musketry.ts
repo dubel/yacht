@@ -17,11 +17,13 @@ const MAX = 16;
 
 interface Ball { pos: THREE.Vector3; vel: THREE.Vector3; age: number; bounces: number }
 
-export type BallHit = 'water' | 'land' | 'wood' | 'ricochet';
+export type BallHit = 'water' | 'land' | 'wood' | 'ricochet' | 'bone';
 
 export class Musketry {
   readonly mesh: THREE.InstancedMesh;
   onHit: ((kind: BallHit, at: THREE.Vector3) => void) | null = null;
+  /** something else a ball can hit on its way from a to b (the Skull Island's guards and rock): where, and what */
+  target: ((a: THREE.Vector3, b: THREE.Vector3) => { at: THREE.Vector3; kind: 'bone' | 'land' } | null) | null = null;
   private readonly balls: Ball[] = [];
   private readonly toBoat = new THREE.Matrix4();
   private readonly qInv = new THREE.Quaternion();
@@ -71,6 +73,8 @@ export class Musketry {
         prevL.copy(local);
       }
       if (hit) { if (b.bounces < 0) this.balls.splice(i, 1); continue; }
+      const other = this.target?.(b.pos, b.pos.clone().add(step));
+      if (other) { this.onHit?.(other.kind, other.at); this.balls.splice(i, 1); continue; }
       b.pos.add(step);
       waves.sample(b.pos.x, b.pos.z, t, this.n);
       const ground = terrainHeight(b.pos.x, b.pos.z);

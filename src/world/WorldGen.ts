@@ -25,6 +25,8 @@ export interface Island {
   stretch?: [number, number, number];
   /** height of the shoreline shelf above water (m) */
   shore?: number;
+  /** a level plateau round the middle, radius r (m) at height h (a place to build on: the Skull Island's rocks) */
+  flat?: { r: number; h: number };
 }
 
 /** a ring reef enclosing a shallow lagoon, with navigable passes */
@@ -39,6 +41,8 @@ export interface Lagoon {
   islands: Island[];
   /** keep the start area and its surroundings clear of coral (home lagoon only) */
   clearStart?: boolean;
+  /** how much wider than usual its passes are (the home lagoon's, so that getting out is easy) */
+  passWidth?: number;
 }
 
 type Feature =
@@ -63,6 +67,7 @@ const HOME: Lagoon = {
   ellipse: 1.08,
   // south-east (the original pass by the "Przejście w rafie" mark), north, west
   passes: [0.62, -1.9, 3.02],
+  passWidth: 2.5,
   clearStart: true,
   islands: [
     { x: -175, z: -130, radius: 95, peak: 38, rock: 0.35 },
@@ -99,7 +104,11 @@ function islandHeight(isl: Island, x: number, z: number): number {
     const dome = Math.pow(1 - r * r, 1.4);
     const bumps = fbm(x / 22, z / 22, 4) - 0.5;
     const crag = isl.rock * Math.abs(fbm(x / 9, z / 9, 3) - 0.5) * 2;
-    return shore + isl.peak * dome * (0.8 + 0.5 * bumps + 0.35 * crag);
+    const h = shore + isl.peak * dome * (0.8 + 0.5 * bumps + 0.35 * crag);
+    if (!isl.flat) return h;
+    // the plateau: level within r, easing into the hill round it (measured without the coastline's wobble)
+    const k = smoothstep(isl.flat.r * 1.6, isl.flat.r, Math.hypot(x - isl.x, z - isl.z));
+    return h + (isl.flat.h - h) * k;
   }
   // underwater shoulder: gentle beach shelf, then steeper (keeps falling, below the ocean floor far out)
   const o = d - R;
@@ -135,7 +144,7 @@ function lagoonHeight(L: Lagoon, x: number, z: number): number {
   const rd = Math.hypot(lx / L.ellipse, lz);
   const ang = Math.atan2(lz, lx);
   let pass = 0;
-  for (const p of L.passes) pass = Math.max(pass, smoothstep(0.22, 0.08, angDiff(ang, p) * (430 / L.radius)));
+  for (const p of L.passes) pass = Math.max(pass, smoothstep(0.22, 0.08, angDiff(ang, p) * (430 / L.radius) / (L.passWidth ?? 1)));
   const crest = -0.35 + 0.8 * (fbm(x / 30, z / 30, 3) - 0.5) - pass * 5.5;
   const reef = crest - Math.pow(Math.abs(rd - L.radius) / 22, 2) * 3.2;
   h = smax(h, reef, 3);
@@ -162,7 +171,15 @@ function featureCenter(f: Feature): [number, number] {
 /** cell size (m); every feature's reach is well under one cell, so a 3×3 neighbourhood covers any point */
 export const CELL = 2000;
 let SEED = 1337;
-const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME), name: 'Laguna Startowa' };
+const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME), name: 'Laguna Karmazynowa' };
+
+/**
+ * The Skull Island: hand-made like the home lagoon (the same in every world), a couple of minutes' sail west
+ * of its west pass. A wooded hill with a level plateau in the middle, where the rocks and the cave stand
+ * (SkullIsland builds them).
+ */
+export const SKULL_ISLAND: Island = { x: -1050, z: 60, radius: 150, peak: 14, rock: 0.3, flat: { r: 62, h: 4 } };
+const SKULL_FEATURE: Feature = { kind: 'island', isl: SKULL_ISLAND, reach: islandReach(SKULL_ISLAND), name: 'Wyspa Czaszek' };
 const cellCache = new Map<number, Feature[]>();
 
 /** choose the procedural world (the home lagoon never changes) */
@@ -245,9 +262,12 @@ function cellFeatures(i: number, j: number): Feature[] {
     // the ocean around the home lagoon stays open for a while: no features overlapping its reef or slope
     const [fx, fz] = featureCenter(f);
     if (Math.hypot(fx, fz) < HOME_FEATURE.reach + f.reach + 300) continue;
+    // …and round the Skull Island
+    if (Math.hypot(fx - SKULL_ISLAND.x, fz - SKULL_ISLAND.z) < SKULL_FEATURE.reach + f.reach + 200) continue;
     out.push(f);
   }
   if (i === 0 && j === 0) out.push(HOME_FEATURE);
+  if (i === Math.floor(SKULL_ISLAND.x / CELL) && j === Math.floor(SKULL_ISLAND.z / CELL)) out.push(SKULL_FEATURE);
   cellCache.set(key, out);
   return out;
 }
@@ -302,7 +322,7 @@ export function reefsNear(x: number, z: number, radius: number): Lagoon[] {
 /** 0 on solid reef … 1 in the middle of a pass, at angle `a` round lagoon `L` (as the heightfield cuts them) */
 export function passOpening(L: Lagoon, a: number): number {
   let pass = 0;
-  for (const p of L.passes) pass = Math.max(pass, smoothstep(0.22, 0.08, angDiff(a, p) * (430 / L.radius)));
+  for (const p of L.passes) pass = Math.max(pass, smoothstep(0.22, 0.08, angDiff(a, p) * (430 / L.radius) / (L.passWidth ?? 1)));
   return pass;
 }
 
@@ -320,7 +340,16 @@ const set3 = (o: number[], a: readonly number[], k = 1) => { o[0] = a[0] * k; o[
 const scale3 = (o: number[], k: number) => { o[0] *= k; o[1] *= k; o[2] *= k; };
 
 /** linear RGB of the ground at (x, z) with height h and normal-y ny, written to out[0..2] */
+const DIRT = C(0.33, 0.25, 0.17);
+
 export function terrainColor(x: number, z: number, h: number, ny: number, out: number[]): void {
+  terrainColorBase(x, z, h, ny, out);
+  // the Skull Island's plateau: bare, trodden earth round the rocks
+  const d = Math.hypot(x - SKULL_ISLAND.x, z - SKULL_ISLAND.z), r = SKULL_ISLAND.flat!.r;
+  if (d < r * 1.3 && h > 0.5) mix3(out, DIRT, smoothstep(r * 1.3, r * 0.9, d) * (0.8 + 0.2 * fbm(x / 6, z / 6, 2)));
+}
+
+function terrainColorBase(x: number, z: number, h: number, ny: number, out: number[]): void {
   const n1 = fbm(x / 12, z / 12, 3), n2 = vnoise(x / 3, z / 3);
   if (h < -0.4) {
     set3(out, SEABED, 0.85 + 0.3 * n2);

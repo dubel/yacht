@@ -144,6 +144,11 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
 - **Przedmioty (ekwipunek, HUD)**, licencja **CC-BY-4.0**, wersje zoptymalizowane w `public/assets/items/` (`npm run optimize-items`; oryginały w `assets/`):
   „Pirate Coin (game ready asset)” — Pixel Life ([Sketchfab](https://sketchfab.com/3d-models/pirate-coin-game-ready-asset-7f5bd42a45164a64a20a39a8c37befb5)),
   „Telescope” — Mathilde Beuvin ([Sketchfab](https://sketchfab.com/3d-models/telescope-b5d0390f357044c086727bd5cb7ab043)).
+- **Wyspa Czaszek**, wersje zoptymalizowane w `public/assets/island/` (`npm run optimize-island`; oryginały w `assets/`):
+  „blocky Rocks” i „Torch stick” — DJMaesen, **CC-BY-4.0**; „Skull Cave Entrance” — omelchenko.igor.1986, **CC-BY-4.0**;
+  „Skeleton Pirate "The Captin"” — FireGoat, **CC-BY-4.0**;
+  „Treasure Chest” — Amanda Alavi, **CC-BY-NC-ND-4.0** (niekomercyjnie, bez utworów zależnych);
+  „Pirate Coin” — ehcawen, **CC-BY-NC-4.0** (niekomercyjnie). Wszystkie z Sketchfab.
 - **Clearwater** — © 2026 Lumaris (Aurélien), licencja **MIT** (`third_party/clearwater/LICENSE`).
   Z Clearwatera pochodzą: spektrum i GPU FFT, symulacja ripples, kaustyki z dyspersją, model optyczny wody
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing

@@ -372,6 +372,84 @@ export class AudioSystem {
     src.connect(chop).connect(hp).connect(g).connect(this.muffle);
   }
 
+  // ---- the Skull Island: bones struck and falling apart, the dead rising, the gold, the sailor hurt ----
+  /** a short burst of noise through a band, shaped (the pieces the island's sounds are made of) */
+  private knock(t: number, f: number, q: number, level: number, decay: number, pan: number): void {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.start(t, Math.random() * 2, decay * 4 + 0.05);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(level, t + 0.002); g.gain.setTargetAtTime(0, t + 0.003, decay);
+    const p = ctx.createStereoPanner(); p.pan.value = pan;
+    src.connect(bp).connect(g).connect(p).connect(this.muffle);
+  }
+
+  /** a ball or a blade into dry bone: a hard, hollow crack */
+  boneHit(pan: number, distance: number): void {
+    if (!this.ctx) return;
+    const near = Math.min(1, 6 / (distance + 2)), t = this.ctx.currentTime + 0.004;
+    this.knock(t, 1800 + Math.random() * 600, 3, 0.9 * near, 0.018, pan * 0.7);
+    this.knock(t + 0.004, 420, 6, 0.6 * near, 0.05, pan * 0.7);
+  }
+
+  /** a skeleton falling apart: a clatter of bones onto stone */
+  collapse(pan: number, distance: number): void {
+    if (!this.ctx) return;
+    const near = Math.min(1, 8 / (distance + 2)), t0 = this.ctx.currentTime + 0.01;
+    for (let k = 0; k < 18; k++) {
+      const t = t0 + 0.02 + Math.pow(Math.random(), 1.6) * 0.9;
+      this.knock(t, 900 + Math.random() * 2600, 4 + Math.random() * 6, (0.25 + Math.random() * 0.4) * near, 0.012 + Math.random() * 0.02, pan * 0.6 + (Math.random() - 0.5) * 0.3);
+    }
+  }
+
+  /** the dead rising: a dry grinding rattle from the floor */
+  rise(pan: number, distance: number): void {
+    if (!this.ctx) return;
+    const near = Math.min(1, 10 / (distance + 3)), t0 = this.ctx.currentTime + 0.01;
+    for (let k = 0; k < 26; k++) this.knock(t0 + (k / 26) * 1.1 + Math.random() * 0.03, 300 + Math.random() * 900, 3, 0.3 * near * (0.5 + k / 26), 0.02, pan * 0.6);
+  }
+
+  /** gold: a heap of coins poured and chinking */
+  coins(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.01;
+    for (let k = 0; k < 42; k++) {
+      const t = t0 + Math.pow(Math.random(), 1.4) * 1.6;
+      // each coin: a couple of bright, slightly inharmonic partials, dying quickly
+      const f = 2600 + Math.random() * 2400;
+      for (const [m, lv] of [[1, 0.1], [2.76, 0.05], [5.4, 0.025]] as const) {
+        const o = ctx.createOscillator();
+        o.type = 'sine';
+        o.frequency.value = f * m;
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(lv, t + 0.002); g.gain.setTargetAtTime(0, t + 0.003, 0.05 + Math.random() * 0.06);
+        const p = ctx.createStereoPanner(); p.pan.value = (Math.random() - 0.5) * 0.8;
+        o.connect(g).connect(p).connect(this.muffle);
+        o.start(t); o.stop(t + 0.5);
+      }
+      this.knock(t, 5000, 1.5, 0.05, 0.01, 0);
+    }
+  }
+
+  /** the sailor cut: a dull blow, and his breath knocked out */
+  hurt(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.004;
+    this.knock(t, 160, 1.5, 1.2, 0.06, 0);
+    this.knock(t + 0.01, 700, 2, 0.4, 0.04, 0);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.start(t + 0.05, Math.random() * 2, 0.4);
+    const lp = ctx.createBiquadFilter(); lp.type = 'bandpass'; lp.frequency.value = 900; lp.Q.value = 1.2;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0, t + 0.05); g.gain.linearRampToValueAtTime(0.18, t + 0.1); g.gain.linearRampToValueAtTime(0, t + 0.4);
+    src.connect(lp).connect(g).connect(this.muffle);
+  }
+
   /** the kedge anchor let go */
   anchorDrop(pan: number, distance: number): void {
     const near = Math.min(1, 25 / (distance + 6));

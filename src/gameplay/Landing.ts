@@ -149,6 +149,18 @@ export class Landing {
     });
   }
 
+  /** ashore at once from a ship at `ship` — no rowing, no time (for starting a game ashore: ?location) */
+  arriveNow(ship: THREE.Vector3): boolean {
+    const sp = this.find(ship);
+    if (!sp) return false;
+    this.spot = sp;
+    this.beach(sp);
+    this.group.visible = true;
+    this.ashore = true;
+    this.hooks.goAshore(sp.stand, sp.yaw);
+    return true;
+  }
+
   /** the nearest beach round the ship: the first land along rays out from her, where it rises gently */
   private find(o: THREE.Vector3): Spot | null {
     let best: { r: number; a: number; score: number } | null = null;

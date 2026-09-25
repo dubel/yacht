@@ -10,6 +10,7 @@
 //   ?sun=35,200       pin the sun: elevation, azimuth (degrees) — overrides the day cycle
 //   ?speed=4          start the boat moving (m/s), for wake checks
 //   ?seed=7           procedural world beyond the home lagoon (default 1337)
+//   ?location=skull  start ashore at the Skull Island's cave, the ship at anchor off it
 //   ?inventory=all    everything there is to find, into the bag (debug); =reset: the starting kit again;
 //                     =rapier:3,lantern: those things added
 import { parseTime } from '../environment/GameTime';
@@ -45,6 +46,8 @@ export const Config = {
   moonPhase: num('moon'),
   /** ?pause starts with the day clock stopped */
   paused: Q.has('pause'),
+  /** ?location=skull: start ashore by the Skull Island's cave (debug) */
+  location: Q.get('location'),
   /** ?inventory=all|reset|id[:n],… (debug) — see Inventory.debug */
   inventory: Q.get('inventory'),
 

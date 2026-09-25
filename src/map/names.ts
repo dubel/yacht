@@ -73,7 +73,7 @@ const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
  * permutation of the name space (one per world seed and kind) turns it into a name.
  */
 export function placeName(kind: string, i: number, j: number, order: number, seed: number): string {
-  if (kind === 'home') return 'Laguna Startowa';
+  if (kind === 'home') return 'Laguna Karmazynowa';
   const P = namePeriod(kind), per = slotsPerCell(kind);
   const mi = ((i % P) + P) % P, mj = ((j % P) + P) % P;
   const slot = (mi * P + mj) * per + Math.min(order, per - 1);
