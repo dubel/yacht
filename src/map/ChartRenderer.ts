@@ -1,7 +1,6 @@
 import { fbm, smoothstep, vnoise } from '../core/noise';
 import { boxIsOpenOcean, featuresNear, terrainHeight } from '../world/WorldGen';
 import { CELL, type Discovery } from './Discovery';
-import { placeName } from './names';
 
 /*
  * An old sea chart drawn with Canvas 2D: aged paper, sepia ink coastlines with a second "echo" line off
@@ -479,7 +478,7 @@ export class ChartRenderer {
       const onScreen = (f.radius * 2) / v.mpp;
       if (f.kind === 'rock' || f.kind === 'cay' ? onScreen < 5 : onScreen < 2.5) continue;
       if (!this.discovery.isSeen(f.x, f.z)) continue;
-      const name = placeName(f.kind, f.x, f.z);
+      const name = f.name;
       const size = Math.round((f.kind === 'home' || f.kind === 'atoll' ? 15 : 12) * px);
       ctx.font = `italic ${size}px ${FONT}`;
       const tw = ctx.measureText(name).width;

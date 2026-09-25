@@ -37,7 +37,6 @@ import { Leadsman } from '../gameplay/Leadsman';
 import { Music, type Mood } from '../audio/Music';
 import { terrainHeight as landAt } from '../world/WorldGen';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
-import { placeName } from '../map/names';
 import { Vegetation } from '../world/Vegetation';
 import { Messages } from '../gameplay/Messages';
 import { Surf } from '../world/Surf';
@@ -703,7 +702,7 @@ export class Game {
         if (off < halfAngle * 0.45 && off < best && this.inSight(p, f.x, f.z, f.radius)) {
           best = off;
           const km = shore < 1000 ? `${Math.round(shore / 10) * 10} m` : `${(shore / 1000).toFixed(1).replace('.', ',')} km`;
-          this.scopeLabel = `${placeName(f.kind, f.x, f.z)} · ${km}`;
+          this.scopeLabel = `${f.name} · ${km}`;
           this.discovery.revealAt(f.x, f.z, f.radius + 150);
         }
       }

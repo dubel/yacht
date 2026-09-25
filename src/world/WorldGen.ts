@@ -1,4 +1,5 @@
 import { fbm, mulberry32, smoothstep, vnoise } from '../core/noise';
+import { placeName } from '../map/names';
 
 /**
  * The world's heightfield: the hand-made home lagoon at the origin plus an endless procedural ocean around
@@ -41,8 +42,11 @@ export interface Lagoon {
 }
 
 type Feature =
-  | { kind: 'island'; isl: Island; reach: number }
-  | { kind: 'lagoon'; lag: Lagoon; reach: number };
+  | { kind: 'island'; isl: Island; reach: number; name: string }
+  | { kind: 'lagoon'; lag: Lagoon; reach: number; name: string };
+
+/** what a chart calls an island: a rock stack, a sandy cay, or an island */
+const islandKind = (isl: Island) => (isl.rock > 0.8 ? 'rock' : isl.peak < 3 ? 'cay' : 'island');
 
 const LAGOON_FLOOR = -4.6;
 /** open-ocean floor; deep enough that the water hides it completely (see WATER_SIG_T) */
@@ -158,7 +162,7 @@ function featureCenter(f: Feature): [number, number] {
 /** cell size (m); every feature's reach is well under one cell, so a 3×3 neighbourhood covers any point */
 export const CELL = 2000;
 let SEED = 1337;
-const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME) };
+const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME), name: 'Laguna Startowa' };
 const cellCache = new Map<number, Feature[]>();
 
 /** choose the procedural world (the home lagoon never changes) */
@@ -223,6 +227,7 @@ function cellFeatures(i: number, j: number): Feature[] {
   const busy = smoothstep(0.38, 0.68, fbm(cx / 9000 + SEED * 0.013, cz / 9000 - SEED * 0.007, 2));
   const n = Math.floor(rnd() * (0.6 + 5.4 * busy) + 0.25 * busy);
   let atoll = false;
+  const order: Record<string, number> = {};
   for (let k = 0; k < n; k++) {
     const x = (i + 0.1 + 0.8 * rnd()) * CELL, z = (j + 0.1 + 0.8 * rnd()) * CELL;
     const r = rnd();
@@ -230,10 +235,12 @@ function cellFeatures(i: number, j: number): Feature[] {
     if (r < 0.14 && !atoll) {
       atoll = true;
       const lag = randomAtoll(rnd, x, z);
-      f = { kind: 'lagoon', lag, reach: lagoonReach(lag) };
+      f = { kind: 'lagoon', lag, reach: lagoonReach(lag), name: placeName('atoll', i, j, 0, SEED) };
     } else {
       const isl = randomIsland(rnd, x, z, r < 0.55 ? 'high' : r < 0.82 ? 'cay' : 'rock');
-      f = { kind: 'island', isl, reach: islandReach(isl) };
+      // (the n-th place of its kind in this cell: a slot of its own in the naming scheme)
+      const kind = islandKind(isl);
+      f = { kind: 'island', isl, reach: islandReach(isl), name: placeName(kind, i, j, order[kind] = (order[kind] ?? -1) + 1, SEED) };
     }
     // the ocean around the home lagoon stays open for a while: no features overlapping its reef or slope
     const [fx, fz] = featureCenter(f);
@@ -281,10 +288,10 @@ export function boxIsOpenOcean(x0: number, z0: number, x1: number, z1: number): 
 }
 
 /** island summaries for debugging / maps */
-export function featuresNear(x: number, z: number, radius: number): { kind: string; x: number; z: number; radius: number }[] {
+export function featuresNear(x: number, z: number, radius: number): { kind: string; name: string; x: number; z: number; radius: number }[] {
   return featuresIn(x - radius, z - radius, x + radius, z + radius, []).map((f) =>
-    f.kind === 'island' ? { kind: f.isl.rock > 0.8 ? 'rock' : f.isl.peak < 3 ? 'cay' : 'island', x: f.isl.x, z: f.isl.z, radius: f.isl.radius }
-      : { kind: f === HOME_FEATURE ? 'home' : 'atoll', x: f.lag.x, z: f.lag.z, radius: f.lag.radius });
+    f.kind === 'island' ? { kind: islandKind(f.isl), name: f.name, x: f.isl.x, z: f.isl.z, radius: f.isl.radius }
+      : { kind: f === HOME_FEATURE ? 'home' : 'atoll', name: f.name, x: f.lag.x, z: f.lag.z, radius: f.lag.radius });
 }
 
 /** the ring reefs (lagoons, the home one included) within `radius` of (x, z) */
