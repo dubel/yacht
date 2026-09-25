@@ -131,6 +131,8 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
 - **Model łodzi**: „Swedish royal yacht Amadis” — Museovirasto / Finnish Heritage Agency,
   [Sketchfab](https://sketchfab.com/3d-models/swedish-royal-yacht-amadis-1f320f9e96cd4a9d961d7b1553a2feed),
   licencja **CC-BY-4.0**. W repo jest tylko wersja zoptymalizowana; oryginał (62 MB) trzymamy lokalnie w `assets/` (`npm run optimize-boat`); żagle postawione są generowane w kodzie.
+- **Szalupa**: „Wooden Boat” — donnichols, [Sketchfab](https://sketchfab.com/3d-models/wooden-boat-627ba38e06aa4536b90706a8626c74d4),
+  licencja **CC-BY-4.0**. W repo wersja zoptymalizowana (`public/assets/boats/jollyboat.glb`, 12,7 MB → 0,5 MB); oryginał w `assets/` (`npm run optimize-jollyboat`).
 - **Clearwater** — © 2026 Lumaris (Aurélien), licencja **MIT** (`third_party/clearwater/LICENSE`).
   Z Clearwatera pochodzą: spektrum i GPU FFT, symulacja ripples, kaustyki z dyspersją, model optyczny wody
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing

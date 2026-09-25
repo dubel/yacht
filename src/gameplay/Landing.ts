@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { featuresNear, terrainHeight } from '../world/WorldGen';
 import { fadeThrough } from './fade';
 
@@ -39,66 +41,18 @@ export interface LandingHooks {
   hours(h: number): void;
 }
 
-/** a small clinker jolly boat, ~4.2 m: an open hull of U-sections, a transom, two thwarts and the oars */
-function jollyBoat(): THREE.Group {
-  const L = 4.2, W = 0.78, N = 14, M = 9;
-  const pos: number[] = [];
-  const sect: THREE.Vector3[][] = [];
-  for (let i = 0; i <= N; i++) {
-    const t = (i / N) * 2 - 1; // −1 stern … 1 bow
-    const bow = Math.max(t, 0);
-    const w = W * Math.sqrt(Math.max(0, 1 - bow ** 1.8)) * (t < 0 ? 1 - 0.28 * t * t : 1);
-    const gun = 0.58 + 0.2 * bow * bow, keel = 0.25 * bow ** 3;
-    const ring: THREE.Vector3[] = [];
-    for (let k = 0; k < M; k++) {
-      const th = (k / (M - 1)) * Math.PI;
-      ring.push(new THREE.Vector3(-w * Math.cos(th), gun - (gun - keel) * Math.pow(Math.sin(th), 0.6), t * (L / 2)));
-    }
-    sect.push(ring);
-  }
-  const tri = (a: THREE.Vector3, b: THREE.Vector3, c: THREE.Vector3) => pos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
-  for (let i = 0; i < N; i++)
-    for (let k = 0; k < M - 1; k++) {
-      const a = sect[i][k], b = sect[i][k + 1], c = sect[i + 1][k], d = sect[i + 1][k + 1];
-      tri(a, c, b); tri(b, c, d);
-    }
-  // the transom: a fan across the stern section
-  const s0 = sect[0], mid = s0[0].clone().add(s0[M - 1]).multiplyScalar(0.5);
-  for (let k = 0; k < M - 1; k++) tri(mid, s0[k + 1], s0[k]);
-  const g = new THREE.BufferGeometry();
-  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  g.computeVertexNormals();
-  const hull = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0x3d2817, roughness: 0.85, side: THREE.DoubleSide, flatShading: true }));
-  const wood = new THREE.MeshStandardMaterial({ color: 0x9a7a52, roughness: 0.8, flatShading: true });
-  const group = new THREE.Group();
-  group.add(hull);
-  for (const z of [-0.5, 0.55]) {
-    const th = new THREE.Mesh(new THREE.BoxGeometry(W * 1.65, 0.05, 0.24), wood);
-    th.position.set(0, 0.42, z);
-    group.add(th);
-  }
-  // the oars, shipped: laid fore and aft on the thwarts
-  for (const x of [-0.2, 0.2]) {
-    const oar = new THREE.Group();
-    const loom = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 2.3, 6), wood);
-    loom.rotation.x = Math.PI / 2;
-    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.015, 0.6), wood);
-    blade.position.z = -1.2;
-    oar.add(loom, blade);
-    oar.position.set(x, 0.47, 0.1);
-    oar.rotation.y = x * 0.06;
-    group.add(oar);
-  }
-  group.traverse((o) => { if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true; } });
-  return group;
-}
-
 export class Landing {
   readonly group = new THREE.Group();
   ashore = false;
   /** obstacles the boat on the beach puts in the sailor's way: [x, z, r] */
   readonly obstacles: [number, number, number][] = [];
-  private readonly boat = jollyBoat();
+  /** the boat's pivot: bow toward +z, keel on y = 0, middle of the hull at the origin (filled by load) */
+  private readonly boat = new THREE.Group();
+  /** hull length and beam (m) */
+  private length = 4;
+  private beam = 1.5;
+  /** points of the hull's bottom (boat frame): none of them may end up under the sand */
+  private readonly keel: THREE.Vector3[] = [];
   private spot: Spot | null = null;
   private findT = 0;
   private busy = false;
@@ -115,7 +69,7 @@ export class Landing {
   }
 
   /**
-   * Once per frame. Aboard: `canGo` (on deck, the ship at anchor) and where she is; ashore: where he is.
+   * Once per frame. Aboard: `canGo` (the ship at anchor) and where she is; ashore: where he is.
    * `b`: the B key this frame.
    */
   update(dt: number, s: { canGo: boolean; ship: THREE.Vector3; sailor: THREE.Vector2 | null; b: boolean }): void {
@@ -149,6 +103,48 @@ export class Landing {
         this.hooks.say(`Szalupa czeka na plaży — ${Math.round(d)} m stąd, na ${dirs[k]}.`, 3);
       }
     }
+  }
+
+  /**
+   * The jolly boat: "Wooden Boat" by donnichols (Sketchfab, CC-BY-4.0), optimised (npm run optimize-jollyboat).
+   * Its units are cm and its stern is where the rear bench is; it is turned and set so the bow is +z.
+   */
+  async load(url: string): Promise<void> {
+    const loader = new GLTFLoader();
+    loader.setMeshoptDecoder(MeshoptDecoder);
+    const model = (await loader.loadAsync(url)).scene;
+    model.scale.setScalar(0.01);
+    const pivot = new THREE.Group();
+    pivot.add(model);
+    pivot.updateMatrixWorld(true);
+    const hull = new THREE.Box3().setFromObject(model.getObjectByName('Base') ?? model);
+    const size = hull.getSize(new THREE.Vector3()), mid = hull.getCenter(new THREE.Vector3());
+    // lengthwise along z
+    const along = size.z >= size.x;
+    this.length = along ? size.z : size.x;
+    this.beam = along ? size.x : size.z;
+    // (the model is scaled inside the pivot: its offset is in metres, in the pivot's frame)
+    model.position.set(-mid.x, -hull.min.y, -mid.z);
+    const turn = new THREE.Group();
+    turn.add(pivot);
+    if (!along) pivot.rotation.y = Math.PI / 2;
+    turn.updateMatrixWorld(true);
+    const rear = model.getObjectByName('RearBench');
+    if (rear && rear.getWorldPosition(new THREE.Vector3()).z > 0) turn.rotation.y = Math.PI;
+    model.traverse((o) => { if (o instanceof THREE.Mesh) { o.castShadow = true; o.receiveShadow = true; } });
+    this.boat.add(turn);
+    // the bottom of the hull: its lowest third, a few hundred vertices of it
+    this.boat.updateMatrixWorld(true);
+    const base = model.getObjectByName('Base');
+    base?.traverse((o) => {
+      if (!(o instanceof THREE.Mesh)) return;
+      const pos = o.geometry.getAttribute('position');
+      const step = Math.max(1, Math.floor(pos.count / 600));
+      for (let i = 0; i < pos.count; i += step) {
+        const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(o.matrixWorld);
+        if (v.y < size.y * 0.35) this.keel.push(v);
+      }
+    });
   }
 
   /** the nearest beach round the ship: the first land along rays out from her, where it rises gently */
@@ -195,13 +191,24 @@ export class Landing {
   /** draw the boat up on the beach, keel along the slope, lying over a little */
   private beach(sp: Spot): void {
     const dx = Math.sin(sp.heading), dz = Math.cos(sp.heading), b = sp.boat;
-    const hb = terrainHeight(b.x + dx * 1.8, b.z + dz * 1.8), hs = terrainHeight(b.x - dx * 1.8, b.z - dz * 1.8);
+    const h = this.length * 0.45;
+    const hb = terrainHeight(b.x + dx * h, b.z + dz * h), hs = terrainHeight(b.x - dx * h, b.z - dz * h);
     const g = this.boat;
     g.rotation.order = 'YXZ';
-    g.rotation.set(-Math.atan2(hb - hs, 3.6), sp.heading, 0.12);
-    g.position.set(b.x, Math.max(terrainHeight(b.x, b.z), (hb + hs) / 2) - 0.08, b.z);
+    g.rotation.set(-Math.atan2(hb - hs, 2 * h), sp.heading, 0.06);
+    // high enough that the sand stays under the whole bottom, bedded in it by a few cm
+    g.position.set(b.x, 0, b.z);
+    g.updateMatrixWorld(true);
+    let lift = terrainHeight(b.x, b.z);
+    const w = new THREE.Vector3();
+    for (const k of this.keel) {
+      w.copy(k).applyMatrix4(g.matrixWorld);
+      lift = Math.max(lift, terrainHeight(w.x, w.z) - w.y);
+    }
+    g.position.y = lift - 0.03;
     this.obstacles.length = 0;
-    for (const k of [-1.4, 0, 1.4]) this.obstacles.push([b.x + dx * k, b.z + dz * k, 0.75 - Math.abs(k) * 0.12]);
+    const r = this.beam * 0.5;
+    for (const k of [-1, -0.5, 0, 0.5, 1]) this.obstacles.push([b.x + dx * k * (h - r * 0.5), b.z + dz * k * (h - r * 0.5), r * (1 - 0.35 * Math.abs(k))]);
   }
 
   private row(sp: Spot, ship: THREE.Vector3): void {

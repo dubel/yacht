@@ -305,6 +305,7 @@ export class Game {
       hours: (h) => { this.clock.advance(h); this.clouds.skip(h * 3600, { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed }); },
     });
     this.land.obstacles = this.landing.obstacles;
+    await this.landing.load('assets/boats/jollyboat.glb');
     this.scene.add(this.landing.group);
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
     this.scene.add(this.fish.mesh, this.gulls.mesh);
@@ -471,7 +472,7 @@ export class Game {
     this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
     this.anchor.update(stepDt, this.input.wasPressed('KeyZ') && !this.ashore, this.wind.speed, this.kedge.state !== 'afloat');
     this.landing.update(stepDt, {
-      canGo: this.onDeck && this.anchor.riding && !this.gunSight.active, ship: body.origin,
+      canGo: this.anchor.riding && !this.gunSight.active, ship: body.origin,
       sailor: this.ashore ? this.land.pos : null, b: this.input.wasPressed('KeyB') && !this.map.open,
     });
     // a squall coming on: the call to strike sail; laid over past ~78°: the crew lets everything fly

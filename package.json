@@ -7,7 +7,8 @@
     "preview": "vite preview",
     "typecheck": "tsc",
     "shot": "node tools/shot.mjs",
-    "optimize-boat": "gltf-transform optimize assets/swedish_royal_yacht_amadis.glb public/assets/boats/amadis.glb --texture-compress webp --texture-size 2048 --compress meshopt --flatten false --join false"
+    "optimize-boat": "gltf-transform optimize assets/swedish_royal_yacht_amadis.glb public/assets/boats/amadis.glb --texture-compress webp --texture-size 2048 --compress meshopt --flatten false --join false",
+    "optimize-jollyboat": "gltf-transform optimize assets/wooden_boat.glb public/assets/boats/jollyboat.glb --texture-compress webp --texture-size 1024 --compress meshopt --flatten false --join false"
   },
   "description": "Lagoon sailing game — Three.js + Clearwater-derived water",
   "dependencies": {
