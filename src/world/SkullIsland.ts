@@ -32,6 +32,15 @@ const GUARDS = 5;
 const GUARD_HP = 10, BALL_HURT = 5.5, CUT_HURT = 3.6, THEIR_CUT = 0.05;
 const RESPAWN_DAYS = 3;
 const KEY = 'lagoon.skull';
+/** the two cuts, as where the sword hand goes from the shoulder (m, his frame: +z ahead, +x his left, +y up):
+ *  the directions the arm points: from up over his right shoulder down across to low on his left, and the other way */
+export const CUT_PATHS: [THREE.Vector3, THREE.Vector3][] = [
+  [new THREE.Vector3(-0.4, 0.9, -0.15), new THREE.Vector3(0.45, -0.8, 0.55)],
+  [new THREE.Vector3(0.3, 0.9, 0.05), new THREE.Vector3(-0.5, -0.8, 0.55)],
+];
+const Y = new THREE.Vector3(0, 1, 0);
+/** how long the bones of the fallen lie (s, real time), and how long they take to sink away */
+const BONES_LIE = 45, BONES_SINK = 4;
 
 interface Sample { p: THREE.Vector3; t: THREE.Vector3; n: THREE.Vector3; s: number }
 type GuardState = 'waiting' | 'rising' | 'chasing' | 'dying' | 'dead';
@@ -39,8 +48,16 @@ interface Guard {
   root: THREE.Object3D;
   mixer: THREE.AnimationMixer;
   run: THREE.AnimationAction;
+  /** the sword arm: the upper arm, the forearm, the hand's bone (the sword's handle) */
   arm: THREE.Bone | null;
-  spine: THREE.Bone | null;
+  fore: THREE.Bone | null;
+  hand: THREE.Bone | null;
+  /** the blade's way in the hand bone's frame (see bladeAxis) */
+  blade: THREE.Vector3 | null;
+  /** which of the two cuts: 0 high right → low left, 1 high left → low right (his own right and left) */
+  cut: number;
+  /** his heading (rad), turned toward the sailor at a man's pace */
+  yaw: number;
   mats: THREE.MeshStandardMaterial[];
   state: GuardState;
   s: number;
@@ -85,7 +102,7 @@ export class SkullIsland {
   private chestAt = new THREE.Vector3();
   private coins: THREE.InstancedMesh[] = [];
   private readonly bones: THREE.InstancedMesh;
-  private readonly bonePieces: { p: THREE.Vector3; v: THREE.Vector3; q: THREE.Quaternion; w: THREE.Vector3; rest: boolean }[] = [];
+  private readonly bonePieces: { p: THREE.Vector3; v: THREE.Vector3; q: THREE.Quaternion; w: THREE.Vector3; rest: boolean; age: number }[] = [];
   private readonly shards: THREE.InstancedMesh;
   private readonly shardList: { p: THREE.Vector3; v: THREE.Vector3; life: number }[] = [];
   private state = { days: 0, spawnDay: 0, dead: Array(GUARDS).fill(false) as boolean[], looted: false };
@@ -95,6 +112,9 @@ export class SkullIsland {
   private time = 0;
   private readonly v = new THREE.Vector3();
   private readonly m = new THREE.Matrix4();
+  private readonly here = { p: new THREE.Vector3(), t: new THREE.Vector3(), n: new THREE.Vector3() };
+  /** debugging: every swinging guard held at this point of his cut (0–1), or null */
+  debugSwing: number | null = null;
 
   constructor(private readonly hooks: SkullHooks) {
     this.group.name = 'skull island';
@@ -145,6 +165,16 @@ export class SkullIsland {
   private sample(s: number): Sample {
     const i = THREE.MathUtils.clamp(Math.round((s / this.sEnd) * (this.samples.length - 1)), 0, this.samples.length - 1);
     return this.samples[i];
+  }
+
+  /** the path at s, between its samples (for what moves along it: a guard mustn't hop from sample to sample) */
+  private lerpAt(s: number, out: { p: THREE.Vector3; t: THREE.Vector3; n: THREE.Vector3 }): void {
+    const f = THREE.MathUtils.clamp((s / this.sEnd) * (this.samples.length - 1), 0, this.samples.length - 1);
+    const i = Math.min(Math.floor(f), this.samples.length - 2), k = f - i;
+    const a = this.samples[i], b = this.samples[i + 1];
+    out.p.lerpVectors(a.p, b.p, k);
+    out.t.lerpVectors(a.t, b.t, k).normalize();
+    out.n.set(-out.t.z, 0, out.t.x);
   }
 
   /** the passage's half-width, its walls' height and its ceiling's, at s (the chamber is wider and higher) */
@@ -416,11 +446,11 @@ export class SkullIsland {
       const mixer = new THREE.AnimationMixer(model);
       const run = mixer.clipAction(clip);
       run.play();
-      let arm: THREE.Bone | null = null, spine: THREE.Bone | null = null;
-      model.traverse((o) => { if ((o as THREE.Bone).isBone) { if (o.name.startsWith('R_shoulder')) arm = o as THREE.Bone; if (o.name.startsWith('Spine2')) spine = o as THREE.Bone; } });
+      let arm: THREE.Bone | null = null, fore: THREE.Bone | null = null, hand: THREE.Bone | null = null;
+      model.traverse((o) => { if ((o as THREE.Bone).isBone) { if (o.name.startsWith('R_shoulder')) arm = o as THREE.Bone; if (o.name.startsWith('R_forarm')) fore = o as THREE.Bone; if (o.name.startsWith('HandleBone')) hand = o as THREE.Bone; } });
       root.visible = false;
       this.group.add(root);
-      this.guards.push({ root, mixer, run, arm, spine, mats, state: 'waiting', s: spots[n], lat: 0, hp: GUARD_HP, t: 0, cool: 1, swing: 0, struck: false, flash: 0, spawnS: spots[n] });
+      this.guards.push({ root, mixer, run, arm, mats, fore, hand, blade: hand ? bladeAxis(model, hand) : null, cut: 0, yaw: 0, state: 'waiting', s: spots[n], lat: 0, hp: GUARD_HP, t: 0, cool: 1, swing: 0, struck: false, flash: 0, spawnS: spots[n] });
     }
   }
 
@@ -518,11 +548,11 @@ export class SkullIsland {
           g.s = THREE.MathUtils.clamp(g.s + go, this.sMouth + 1, this.sEnd - 1);
           g.run.timeScale = go !== 0 ? 1.1 : 0.15;
           const d = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
-          if (g.swing === 0 && g.cool <= 0 && d < 1.7) { g.swing = 0.001; g.struck = false; this.hooks.sound('swing', g.root.position); }
+          if (g.swing === 0 && g.cool <= 0 && d < 1.7) { g.swing = 0.001; g.struck = false; g.cut = 1 - g.cut; this.hooks.sound('swing', g.root.position); }
         } else g.run.timeScale = 0.15;
         if (g.swing > 0) {
-          g.swing += dt / 0.8;
-          // the blow lands at the end of the wind-up, if he is still in reach
+          g.swing = this.debugSwing ?? g.swing + dt / 0.85;
+          // the blow lands as the blade comes down through the middle of the cut, if he is still in reach
           if (!g.struck && g.swing > 0.6) {
             g.struck = true;
             const d = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
@@ -536,20 +566,23 @@ export class SkullIsland {
         g.root.scale.set(1, 1 - 0.9 * k, 1);
         if (g.t > 0.45) { g.state = 'dead'; g.root.visible = false; }
       }
-      const at = this.sample(g.s);
+      const at = this.here;
+      this.lerpAt(g.s, at);
       g.root.position.set(at.p.x + at.n.x * g.lat, FLOOR + 0.04 - rise * 1.9, at.p.z + at.n.z * g.lat);
-      // face him (or down the passage toward the mouth)
+      // face him (or down the passage toward the mouth), turning at a man's pace
       const look = feet ? this.v.set(feet.x - g.root.position.x, 0, feet.z - g.root.position.z) : this.v.copy(sm.t).negate();
-      if (look.lengthSq() > 1e-4) g.root.rotation.y = Math.atan2(look.x, look.z);
-      g.mixer.update(dt);
-      // the cut: the sword arm raised back, then brought down across; the body turning into it
-      if (g.swing > 0 && g.arm) {
-        const w = g.swing < 0.6 ? Math.sin((g.swing / 0.6) * Math.PI * 0.5) : Math.cos(((g.swing - 0.6) / 0.4) * Math.PI * 0.5) * 1.0 - 0.5 * Math.sin(((g.swing - 0.6) / 0.4) * Math.PI);
-        g.arm.rotateX(-1.6 * w);
-        g.arm.rotateZ(0.5 * w);
-        g.spine?.rotateY(-0.35 * w);
+      if (look.lengthSq() > 1e-4) {
+        const want = Math.atan2(look.x, look.z), d = Math.atan2(Math.sin(want - g.yaw), Math.cos(want - g.yaw));
+        g.yaw += g.state === 'rising' ? d : THREE.MathUtils.clamp(d, -6 * dt, 6 * dt);
+        g.root.rotation.y = g.yaw;
       }
+      g.mixer.update(dt);
+      if (g.swing > 0) this.cutPose(g);
     }
+  }
+
+  private cutPose(g: Guard): void {
+    if (g.arm && g.fore && g.hand) swingArm(g.root, g.arm, g.fore, g.hand, g.yaw, g.swing, g.cut, g.blade ?? undefined);
   }
 
   /** a ball from a to b: into a guard (true, and where), or into the passage's rock */
@@ -613,7 +646,7 @@ export class SkullIsland {
         p: new THREE.Vector3(p.x + (Math.random() - 0.5) * 0.4, FLOOR + h, p.z + (Math.random() - 0.5) * 0.4),
         v: new THREE.Vector3((Math.random() - 0.5) * 1.6, Math.random() * 0.8, (Math.random() - 0.5) * 1.6),
         q: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.random() * 6, Math.random() * 6, Math.random() * 6)),
-        w: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10), rest: false,
+        w: new THREE.Vector3((Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10, (Math.random() - 0.5) * 10), rest: false, age: 0,
       });
     }
     this.saveState();
@@ -622,6 +655,13 @@ export class SkullIsland {
 
   private updateBones(dt: number): void {
     const one = new THREE.Vector3(1, 1, 1), dq = new THREE.Quaternion();
+    // the bones of the fallen lie a while, then sink into the floor and are gone
+    for (let i = this.bonePieces.length - 1; i >= 0; i--) {
+      const b = this.bonePieces[i];
+      b.age += dt;
+      if (b.age > BONES_LIE) { b.rest = true; b.p.y -= (0.12 / BONES_SINK) * dt; }
+      if (b.age > BONES_LIE + BONES_SINK) this.bonePieces.splice(i, 1);
+    }
     this.bonePieces.forEach((b, k) => {
       if (!b.rest) {
         b.v.y -= 9.81 * dt;
@@ -689,7 +729,7 @@ export class SkullIsland {
     for (let k = 0; k < 22; k++) {
       this.bonePieces.push({
         p: new THREE.Vector3(sm.p.x + (Math.random() - 0.5) * 0.9, FLOOR + 0.1, sm.p.z + (Math.random() - 0.5) * 0.9),
-        v: new THREE.Vector3(), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, Math.random() * 6.28, 0)), w: new THREE.Vector3(), rest: true,
+        v: new THREE.Vector3(), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, Math.random() * 6.28, 0)), w: new THREE.Vector3(), rest: true, age: 0,
       });
     }
   }
@@ -722,6 +762,77 @@ export class SkullIsland {
     const at = sm.p.clone().addScaledVector(sm.t, -(this.skullDepth + 5));
     return { at, yaw: Math.atan2(sm.t.x, sm.t.z) };
   }
+}
+
+/**
+ * A guard's cut: the sword arm straightened out along the way the cut goes — the upper arm and the forearm
+ * each turned (in world terms) to lie along it, the elbow a little bent forward — so the hand with the sabre
+ * sweeps a clean arc: wound up high over one shoulder, brought down across him to low on the other side, and
+ * back, blended in and out of the running pose. `p` 0–1 through the cut. The directions are in his frame
+ * (+z ahead, +x his left, +y up).
+ */
+export function swingArm(root: THREE.Object3D, arm: THREE.Bone, fore: THREE.Bone, hand: THREE.Bone, yaw: number, p: number, cut: number, blade?: THREE.Vector3): void {
+  const ease = (x: number) => x * x * (3 - 2 * x);
+  const [from, to] = CUT_PATHS[cut];
+  let w: number, k: number;
+  if (p < 0.45) { w = ease(p / 0.45); k = 0; }                 // winding up
+  else if (p < 0.7) { w = 1; k = ease((p - 0.45) / 0.25); }    // the cut
+  else { w = 1 - ease((p - 0.7) / 0.3); k = 1; }               // recovering
+  // (through the cut the arm swings round, not straight across: slerp the direction)
+  const dir = new THREE.Vector3().copy(from).normalize().lerp(to.clone().normalize(), k).normalize();
+  if (k > 0 && k < 1) dir.addScaledVector(new THREE.Vector3(0, 0, 1), Math.sin(k * Math.PI) * 0.6).normalize();
+  dir.applyAxisAngle(Y, yaw);
+  // the forearm a touch further forward than the upper arm: the elbow slightly bent
+  const foreDir = dir.clone().add(new THREE.Vector3(0, 0, 0.35).applyAxisAngle(Y, yaw)).normalize();
+  root.updateMatrixWorld(true);
+  const aim = (b: THREE.Bone, child: THREE.Object3D, d: THREE.Vector3) => {
+    const at = b.getWorldPosition(new THREE.Vector3());
+    const cur = child.getWorldPosition(new THREE.Vector3()).sub(at).normalize();
+    const world = b.getWorldQuaternion(new THREE.Quaternion());
+    const aimed = new THREE.Quaternion().setFromUnitVectors(cur, d).multiply(world);
+    const parent = b.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+    b.quaternion.slerp(parent.multiply(aimed), w);
+    b.updateMatrixWorld(true);
+  };
+  aim(arm, fore, dir);
+  aim(fore, hand, foreDir);
+  // the blade carrying on the forearm's line (a little further forward still): it leads the arc
+  if (blade) {
+    const bd = foreDir.clone().add(new THREE.Vector3(0, 0, 0.1).applyAxisAngle(Y, yaw)).normalize();
+    const world = hand.getWorldQuaternion(new THREE.Quaternion());
+    const cur = blade.clone().applyQuaternion(world);
+    const aimed = new THREE.Quaternion().setFromUnitVectors(cur, bd).multiply(world);
+    const parent = hand.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+    hand.quaternion.slerp(parent.multiply(aimed), w);
+  }
+}
+
+/**
+ * Which way the blade points in the hand bone's own frame: the long axis of the vertices bound to that bone,
+ * toward the far end (the point). Found once from the model's bind pose.
+ */
+export function bladeAxis(model: THREE.Object3D, hand: THREE.Bone): THREE.Vector3 | null {
+  const pts: THREE.Vector3[] = [];
+  model.traverse((o) => {
+    const m = o as THREE.SkinnedMesh;
+    if (!m.isSkinnedMesh) return;
+    const bi = m.skeleton.bones.indexOf(hand);
+    if (bi < 0) return;
+    const pos = m.geometry.getAttribute('position'), si = m.geometry.getAttribute('skinIndex'), sw = m.geometry.getAttribute('skinWeight');
+    const toBone = m.skeleton.boneInverses[bi].clone().multiply(m.bindMatrix);
+    for (let i = 0; i < pos.count; i++)
+      for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === bi && sw.getComponent(i, c) > 0.9) pts.push(new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(toBone));
+  });
+  if (pts.length < 10) return null;
+  const c = pts.reduce((a, q) => a.add(q), new THREE.Vector3()).divideScalar(pts.length);
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (const q of pts) { const d = q.clone().sub(c).toArray(); for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) C[i][j] += d[i] * d[j]; }
+  let v = new THREE.Vector3(1, 0.3, 0.2);
+  for (let k = 0; k < 40; k++) v = new THREE.Vector3(C[0][0] * v.x + C[0][1] * v.y + C[0][2] * v.z, C[1][0] * v.x + C[1][1] * v.y + C[1][2] * v.z, C[2][0] * v.x + C[2][1] * v.y + C[2][2] * v.z).normalize();
+  // toward the point: the end farther from the bone (the grip is at it)
+  let far = 0;
+  for (const q of pts) if (Math.abs(q.dot(v)) > Math.abs(far)) far = q.dot(v);
+  return far < 0 ? v.negate() : v;
 }
 
 /** the closest points of segments a0–a1 and b0–b1, and their distance */
