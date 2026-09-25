@@ -5,8 +5,12 @@ export class Hud {
   private readonly el = document.getElementById('hud')!;
   private readonly help = document.getElementById('help')!;
   private tick = 0;
-  /** the ship's instruments (F10), remembered between sessions; ashore they are put away of themselves */
+  /** the ship's instruments (F10): the choice aboard, remembered between sessions; what is on screen now.
+   *  Going ashore puts them away of themselves, coming aboard brings the choice back; F10 always shows or
+   *  hides them at once, ashore too. */
   private instrumentsOn = (() => { try { return localStorage.getItem('lagoon.instruments') !== 'off'; } catch { return true; } })();
+  private shown = this.instrumentsOn;
+  private wasAshore = false;
   /** the controls panel (F8), remembered between sessions */
   private helpOn = (() => { try { return localStorage.getItem('lagoon.help') !== 'off'; } catch { return true; } })();
 
@@ -33,9 +37,14 @@ export class Hud {
 
   /** F10: the instruments on / off; returns whether they are now on */
   toggleInstruments(): boolean {
-    this.instrumentsOn = !this.instrumentsOn;
-    try { localStorage.setItem('lagoon.instruments', this.instrumentsOn ? 'on' : 'off'); } catch { /* storage unavailable */ }
-    return this.instrumentsOn;
+    this.shown = !this.shown;
+    this.el.hidden = !this.shown;
+    // (the choice made aboard is the one kept; ashore it is only for now)
+    if (!this.wasAshore) {
+      this.instrumentsOn = this.shown;
+      try { localStorage.setItem('lagoon.instruments', this.shown ? 'on' : 'off'); } catch { /* storage unavailable */ }
+    }
+    return this.shown;
   }
 
   toggleHelp(): void {
@@ -46,7 +55,8 @@ export class Hud {
 
   update(g: Game): void {
     // (ashore the ship's instruments are no use: away, and back when he is aboard again)
-    this.el.hidden = !this.instrumentsOn || g.ashore;
+    if (g.ashore !== this.wasAshore) { this.wasAshore = g.ashore; this.shown = g.ashore ? false : this.instrumentsOn; }
+    this.el.hidden = !this.shown;
     if (this.el.hidden || this.tick++ % 6) return;
     const p = g.physics;
     const deg = (r: number) => (r * 180) / Math.PI;
