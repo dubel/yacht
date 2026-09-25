@@ -64,7 +64,8 @@ canvas#game { position: fixed; inset: 0; width: 100%; height: 100%; display: blo
   opacity: var(--raise); }
 #scope .bearing { top: calc(50% - 44vmin + 14px); font-size: 14px; letter-spacing: 0.08em; }
 #scope .label { top: calc(50% + 44vmin - 46px); font-size: 20px; transition: opacity 0.3s ease; }
-body.scoped #hud, body.scoped #chart .tools { position: fixed; top: 14px; right: 16px; display: flex; gap: 10px; }
+body.scoped #hud, body.scoped #minimap, body.scoped #help, body.scoped #toast { opacity: 0; transition: opacity 0.25s ease; }
+#chart .tools { position: fixed; top: 14px; right: 16px; display: flex; gap: 10px; }
 #chart .tools button { font: italic 15px 'IM Fell English', Georgia, serif; color: rgb(62, 38, 20); cursor: pointer;
   padding: 6px 14px; border: 1px solid rgba(62, 38, 20, 0.6); border-radius: 4px;
   background: linear-gradient(#f1e0b8, #dcc393); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); }
@@ -86,7 +87,8 @@ body.scoped #hud, body.scoped #chart .tools { position: fixed; top: 14px; right:
   font: 13px var(--sans); color: rgba(255, 255, 255, 0.9); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
 #gunsight kbd, #gunhint kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); }
 #gunhint { bottom: 90px; z-index: 6; pointer-events: none; font-size: 15px; }
-body.manning #help, body.manning #minimap, body.manning 
+body.manning #help, body.manning #minimap { opacity: 0.2; }
+
 /* ---- on deck: what is in hand ---- */
 #aimdot { position: fixed; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%;
   background: rgba(255, 245, 225, 0.9); box-shadow: 0 0 3px rgba(0, 0, 0, 0.9); pointer-events: none; z-index: 7; }
