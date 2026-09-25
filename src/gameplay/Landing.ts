@@ -16,6 +16,8 @@ import { fadeThrough } from './fade';
 const MAX_ROW = 700;
 /** rowing speed (m/s) */
 const ROW_SPEED = 1.5;
+/** the lowest ground (m above the sea) any part of the boat is left on: above the wash of the waves */
+const DRY = 0.35;
 /** how close to the boat (m) he must be to take it back */
 const BOARD_R = 5;
 
@@ -171,11 +173,21 @@ export class Landing {
     }
     if (!best) return null;
     const { r, a } = best, dx = Math.sin(a), dz = Math.cos(a);
-    // the boat: run up the beach bow first, its middle ~1.4 m above the waterline
-    const bx = o.x + dx * (r + 1.4), bz = o.z + dz * (r + 1.4);
-    // he stands beside it, a little further up, looking inland
-    const side = 1.9;
-    let sx = o.x + dx * (r + 2.5) + dz * side, sz = o.z + dz * (r + 2.5) - dx * side;
+    // the boat: hauled up the beach bow first, far enough that the whole of it — the stern too, and a
+    // little either side of the keel — lies on sand clear of the wash
+    const half = this.length / 2, dry = (u: number) => {
+      for (let k = 0; k <= 4; k++) {
+        const t = u - half + (k / 4) * this.length;
+        for (const sd of [-0.5, 0, 0.5]) if (terrainHeight(o.x + dx * t + dz * sd, o.z + dz * t - dx * sd) < DRY) return false;
+      }
+      return true;
+    };
+    let u = r + half;
+    while (u < r + half + 20 && !dry(u)) u += 0.25;
+    const bx = o.x + dx * u, bz = o.z + dz * u;
+    // he stands beside it, looking inland
+    const side = this.beam / 2 + 1.2;
+    let sx = o.x + dx * (u + 0.5) + dz * side, sz = o.z + dz * (u + 0.5) - dx * side;
     for (let n = 0; n < 6 && terrainHeight(sx, sz) < 0.3; n++) { sx += dx; sz += dz; }
     let name = '', gap = Infinity;
     for (const f of featuresNear(bx, bz, 1500)) {
@@ -196,7 +208,7 @@ export class Landing {
     const g = this.boat;
     g.rotation.order = 'YXZ';
     g.rotation.set(-Math.atan2(hb - hs, 2 * h), sp.heading, 0.06);
-    // high enough that the sand stays under the whole bottom, bedded in it by a few cm
+    // high enough that the sand stays under the whole bottom
     g.position.set(b.x, 0, b.z);
     g.updateMatrixWorld(true);
     let lift = terrainHeight(b.x, b.z);
@@ -205,7 +217,8 @@ export class Landing {
       w.copy(k).applyMatrix4(g.matrixWorld);
       lift = Math.max(lift, terrainHeight(w.x, w.z) - w.y);
     }
-    g.position.y = lift - 0.03;
+    // (the terrain mesh, 2 m between vertices here, can stand a few cm off the true surface: bed it in less)
+    g.position.y = lift + 0.01;
     this.obstacles.length = 0;
     const r = this.beam * 0.5;
     for (const k of [-1, -0.5, 0, 0.5, 1]) this.obstacles.push([b.x + dx * k * (h - r * 0.5), b.z + dz * k * (h - r * 0.5), r * (1 - 0.35 * Math.abs(k))]);
