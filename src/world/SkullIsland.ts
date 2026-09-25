@@ -31,6 +31,7 @@ const GUARDS = 5;
 /** a guard's life, a ball's and a cut's toll of it (two balls, three cuts), and a guard's cut's toll of the sailor's */
 const GUARD_HP = 10, BALL_HURT = 5.5, CUT_HURT = 3.6, THEIR_CUT = 0.05;
 const RESPAWN_DAYS = 3;
+/** (listed in worldState.ts: a new world clears it) */
 const KEY = 'lagoon.skull';
 /** the two cuts, as where the sword hand goes from the shoulder (m, his frame: +z ahead, +x his left, +y up):
  *  the directions the arm points: from up over his right shoulder down across to low on his left, and the other way */
@@ -732,11 +733,6 @@ export class SkullIsland {
         v: new THREE.Vector3(), q: new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, Math.random() * 6.28, 0)), w: new THREE.Vector3(), rest: true, age: 0,
       });
     }
-  }
-
-  /** everything as it was at the very start (a new game) */
-  reset(): void {
-    try { localStorage.removeItem(KEY); } catch { /* storage unavailable */ }
   }
 
   private saveState(): void {

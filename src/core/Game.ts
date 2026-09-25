@@ -42,6 +42,7 @@ import { ItemIcons } from '../ui/ItemIcons';
 import { InventoryUI } from '../ui/InventoryUI';
 import { Status } from '../ui/Status';
 import { SkullIsland } from '../world/SkullIsland';
+import { resetWorldState } from '../gameplay/worldState';
 import { SKULL_ISLAND } from '../world/WorldGen';
 import type { Weapon } from '../fpv/Weapons';
 import { Leadsman } from '../gameplay/Leadsman';
@@ -279,6 +280,7 @@ export class Game {
       const h = this.heardFrom(at.x, at.z);
       this.audio.bullet(kind, h.pan, Math.hypot(h.d, at.y - this.cam.camera.position.y));
     };
+    if (Config.worldStateReset) resetWorldState();
     // the Skull Island: its rocks, torches, guards and gold
     const sound = { boneHit: 'boneHit', collapse: 'collapse', rise: 'rise' } as const;
     this.skull = new SkullIsland({
@@ -838,7 +840,7 @@ export class Game {
     requestAnimationFrame(() => el.classList.add('on'));
     // (a moment's grace, so a key held in the fight doesn't restart at once)
     setTimeout(() => {
-      const again = () => { this.inventory.reset(); this.skull.reset(); location.reload(); };
+      const again = () => { this.inventory.reset(); resetWorldState(); location.reload(); };
       addEventListener('keydown', again, { once: true });
       el.addEventListener('pointerdown', again, { once: true });
     }, 1200);

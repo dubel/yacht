@@ -11,6 +11,7 @@
 //   ?speed=4          start the boat moving (m/s), for wake checks
 //   ?seed=7           procedural world beyond the home lagoon (default 1337)
 //   ?location=skull  start ashore at the Skull Island's cave, the ship at anchor off it
+//   ?worldStateReset  every place as at the start of the world: guards back, treasure full (see worldState.ts)
 //   ?inventory=all    everything there is to find, into the bag (debug); =reset: the starting kit again;
 //                     =rapier:3,lantern: those things added
 import { parseTime } from '../environment/GameTime';
@@ -46,6 +47,8 @@ export const Config = {
   moonPhase: num('moon'),
   /** ?pause starts with the day clock stopped */
   paused: Q.has('pause'),
+  /** ?worldStateReset (or =true / =1): the world's places as at its start (debug) */
+  worldStateReset: Q.has('worldStateReset') && !['false', '0'].includes(Q.get('worldStateReset')!),
   /** ?location=skull: start ashore by the Skull Island's cave (debug) */
   location: Q.get('location'),
   /** ?inventory=all|reset|id[:n],… (debug) — see Inventory.debug */
