@@ -5,6 +5,10 @@
  * that slides in pitch). Running is louder with a sole scuff; a jump down from the raised deck lands
  * heavier. Pitch, level and timing vary a little per step and left/right feet sit slightly apart in the
  * stereo image, so it never sounds like a looped sample.
+ *
+ * Ashore (playGroundStep) there is no hollow deck to boom: sand gives under the foot with a grainy crunch
+ * (noise chopped into grains, band-passed), grass and leaf litter swish (high noise, a longer brush), and
+ * under both a soft, dead thump of the heel.
  */
 
 export interface StepOptions {
@@ -96,5 +100,59 @@ export function playFootstep(ctx: BaseAudioContext, dest: AudioNode, noise: Audi
     g.gain.linearRampToValueAtTime(level * 2.2, t0 + 0.03);
     g.gain.linearRampToValueAtTime(0, t0 + dur);
     res.connect(g).connect(tone);
+  }
+}
+
+export type GroundKind = 'sand' | 'grass';
+
+/** schedule one footfall ashore: sand crunches, grass swishes, both over a dull thump */
+export function playGroundStep(ctx: BaseAudioContext, dest: AudioNode, noise: AudioBuffer, when: number,
+  o: { pace: number; weight: number; pan: number; ground: GroundKind; rnd?: () => number }): void {
+  const rnd = o.rnd ?? Math.random;
+  const vary = (k: number) => 1 + (rnd() * 2 - 1) * k;
+  const level = 0.55 * (0.55 + 0.45 * o.pace) * Math.min(o.weight, 2.2) * vary(0.2);
+  const out = ctx.createStereoPanner();
+  out.pan.value = o.pan;
+  out.connect(dest);
+  const src = (t0: number, dur: number) => {
+    const s = ctx.createBufferSource();
+    s.buffer = noise;
+    s.start(t0, rnd() * (noise.duration - dur - 0.05), dur + 0.05);
+    return s;
+  };
+  const filter = (type: BiquadFilterType, f: number, q: number) => {
+    const b = ctx.createBiquadFilter();
+    b.type = type; b.frequency.value = f; b.Q.value = q;
+    return b;
+  };
+  // the heel's thump: the ground takes it without ringing
+  {
+    const lp = filter('lowpass', 180 * vary(0.1), 0.8);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, when);
+    g.gain.linearRampToValueAtTime(level * 1.3 * o.weight, when + 0.004);
+    g.gain.setTargetAtTime(0, when + 0.004, 0.02);
+    src(when, 0.06).connect(lp).connect(g).connect(out);
+  }
+  const dur = (o.ground === 'sand' ? 0.13 : 0.18) * (1 - 0.3 * o.pace) * vary(0.2);
+  const t0 = when + 0.008;
+  if (o.ground === 'sand') {
+    // grains: the noise gated on and off in a few-ms stutter, then band-passed to a dry crunch
+    const chop = ctx.createGain();
+    for (let k = 0; k * 0.004 < dur; k++) chop.gain.setValueAtTime(rnd() < 0.45 ? 1 : 0.05, t0 + k * 0.004);
+    const bp = filter('bandpass', 1900 * vary(0.15), 0.8);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(level * 0.9, t0 + 0.015);
+    g.gain.linearRampToValueAtTime(0, t0 + dur);
+    src(t0, dur).connect(chop).connect(bp).connect(g).connect(out);
+  } else {
+    // a brush through grass and dry leaves
+    const hp = filter('highpass', 2600 * vary(0.2), 0.6);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(level * 0.35, t0 + dur * 0.35);
+    g.gain.linearRampToValueAtTime(0, t0 + dur);
+    src(t0, dur).connect(hp).connect(g).connect(out);
   }
 }

@@ -20,6 +20,7 @@ export class Hud {
       '&nbsp;&nbsp;&nbsp;&nbsp;luneta: prawy przycisk myszy (przytrzymaj) lub <kbd>L</kbd>, kółko: przybliżenie &nbsp; <kbd>X</kbd> żagle',
       'działa: <kbd>Ctrl</kbd> lewy / prawy — salwa z lewej / prawej burty; na pokładzie <kbd>Ctrl</kbd> przy dziale — obsadź',
       'na pokładzie: <kbd>1</kbd> pistolet, <kbd>2</kbd> rapier, <kbd>3</kbd> latarnia, <kbd>0</kbd> luneta — <kbd>Ctrl</kbd> / lewy przycisk: strzał / cięcie / unieś latarnię',
+      '<kbd>Z</kbd> rzuć / podnieś kotwicę (przy brzegu, 3–28 m wody) &nbsp; na kotwicy: <kbd>B</kbd> szalupą na ląd i z powrotem',
       'na mieliźnie: <kbd>K</kbd> — wywieźć kotwicę i ściągnąć statek (kedżowanie)',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
@@ -66,6 +67,9 @@ export class Hud {
       row('szot', `${deg(p.sheet).toFixed(0)}°${p.autoTrim ? ' (auto)' : ''}${p.luffing ? ' · łopocze' : ''}`) +
       row('przechył', `${Math.abs(deg(p.heel)).toFixed(0)}°`) +
       (p.sailsUp < 0.5 ? row('żagle', 'zwinięte') : '') +
+      (g.anchor?.state === 'riding' ? row('kotwica', `rzucona · ${Math.round(g.anchor.depth)} m`) : '') +
+      (g.anchor?.state === 'weighing' ? row('kotwica', 'podnoszona…') : '') +
+      (g.ashore ? row('ty', 'na lądzie') : '') +
       (p.grounded ? row('⚠', 'mielizna!') : '');
     const sh = document.getElementById('sndhint');
     if (sh) sh.textContent = g.audio.started ? (g.audio.muted ? '🔇 dźwięk wyciszony (M)' : '🔊 dźwięk włączony (M wycisza)') : '🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk';

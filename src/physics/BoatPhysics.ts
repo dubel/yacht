@@ -188,6 +188,8 @@ export class BoatPhysics {
     this.velocity.set(Math.sin(yaw), 0, Math.cos(yaw)).multiplyScalar(speed);
     this.angVel.set(0, 0, 0);
     this.rudder = 0;
+    this.anchor = null;
+    this.heaving = false;
   }
 
   /** boat yaw (rotation about +Y); bow direction = (sin, cos) */
@@ -214,6 +216,16 @@ export class BoatPhysics {
   warpTo: number | null = null;
   /** friction against the bottom (1 normal; kedging lets the hull slide) */
   groundGrip = 1;
+  /** riding at anchor: where the anchor lies (null: aweigh) and the cable veered (m, horizontal reach) */
+  anchor: THREE.Vector3 | null = null;
+  rode = 40;
+  /** the anchor's hold (N): above it the anchor drags — ploughs through the bottom toward the ship's drift */
+  anchorHold = Infinity;
+  /** weighing: the capstan heaves the cable in, drawing her up to the anchor at a walking pace */
+  heaving = false;
+  /** the anchor dragged this step (m moved) */
+  anchorDrag = 0;
+  private readonly hawse = new THREE.Vector3();
 
   /** knocked down: the crew lets fly everything at once — the sails come in almost instantly */
   dropSails(): void {
@@ -240,7 +252,7 @@ export class BoatPhysics {
     while (this.acc >= DT && steps < 8) {
       this.acc -= DT;
       this.step(DT, t - this.acc);
-      if (this.travel > 1 && !this.grounded) {
+      if (this.travel > 1 && !this.grounded && !this.anchor) {
         this.position.x += this.velocity.x * (this.travel - 1) * DT;
         this.position.z += this.velocity.z * (this.travel - 1) * DT;
       }
@@ -253,7 +265,15 @@ export class BoatPhysics {
   /** false while the sailor walks the deck (WASD moves them; the arrows and Q/E still work the boat) */
   wasd = true;
 
+  /** false while the sailor is ashore: nobody at the helm — the rudder amidships, the sails as they were */
+  helm = true;
+
   private controls(dt: number, input: Input): void {
+    if (!this.helm) {
+      this.rudder *= Math.exp(-dt * 2);
+      this.sailsUp += clamp(this.sailsTarget - this.sailsUp, -dt / 2.5, dt / 2.5);
+      return;
+    }
     const steer = (this.wasd ? input.axis('KeyA', 'KeyD') : 0) + input.axis('ArrowLeft', 'ArrowRight');
     const target = clamp(steer, -1, 1) * 35 * DEG;
     const rate = (steer !== 0 ? 55 : 40) * DEG * dt;
@@ -395,6 +415,38 @@ export class BoatPhysics {
         const want = Math.min(1.6, dist * 0.4);
         const pull = clamp((want - v.dot(f)) * this.mass * 1.2, 0, this.mass * 2.2);
         this.addForce(f.multiplyScalar(pull), r);
+      }
+    }
+
+    // ---- at anchor: the cable lies slack on the bottom until the ship drifts out to its length, then comes
+    //      taut — soft at first as the catenary straightens, hard at full scope — and holds her by the bow ----
+    this.anchorDrag = 0;
+    if (this.anchor) {
+      r.set(0, 0.6, this.info.hullBow - 0.5).applyQuaternion(q).sub(this.hawse.copy(this.com).applyQuaternion(q));
+      const at = this.towAt.copy(this.position).add(r);
+      f.set(this.anchor.x - at.x, 0, this.anchor.z - at.z);
+      const dist = f.length(), slack = this.rode * 0.85;
+      if (this.heaving) {
+        if (dist > 0.5) {
+          f.divideScalar(dist);
+          this.pointVel(r, v);
+          const want = Math.min(0.7, dist * 0.12);
+          this.addForce(f.multiplyScalar(clamp((want - v.dot(f)) * this.mass * 1.2, 0, this.mass * 1.5)), r);
+        }
+      } else if (dist > slack) {
+        f.divideScalar(dist);
+        this.pointVel(r, v);
+        const s = dist - slack;
+        let pull = this.mass * (0.012 * s * s + 0.05 * s) + Math.max(0, -v.dot(f)) * this.mass * 0.5;
+        // more than the ground holds: the anchor drags toward the ship, the cable stays at its hold
+        if (pull > this.anchorHold) {
+          const give = Math.min(s * 0.5, 0.6 * dt);
+          this.anchor.x -= f.x * give;
+          this.anchor.z -= f.z * give;
+          this.anchorDrag = give;
+          pull = this.anchorHold;
+        }
+        this.addForce(f.multiplyScalar(Math.min(pull, this.mass * 3)), r);
       }
     }
 

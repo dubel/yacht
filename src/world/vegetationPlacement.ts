@@ -27,38 +27,64 @@ const PLACE = [
 ];
 const SCALE: [number, number][] = [[0.75, 1.25], [0.8, 1.5], [0.6, 1.3]];
 
+export interface Plant { kind: number; x: number; z: number; h: number; s: number; ax: number; ay: number; az: number }
+
+/** the plant (if any) of world grid cell (i, j) — the same wherever it is asked from */
+export function plantAt(i: number, j: number): Plant | null {
+  const px = (i + hash(i, j, 1) - 0.5) * STEP, pz = (j + hash(i, j, 2) - 0.5) * STEP;
+  const h = terrainHeight(px, pz);
+  if (h < VEG_MIN_H) return null;
+  const e = 0.8;
+  const nx = terrainHeight(px - e, pz) - terrainHeight(px + e, pz), nz = terrainHeight(px, pz - e) - terrainHeight(px, pz + e);
+  const ny = (2 * e) / Math.hypot(nx, 2 * e, nz);
+  const n = fbm(px / 30, pz / 30, 3);
+  const r = hash(i, j, 3);
+  let acc = 0;
+  for (let k = 0; k < VEG_KINDS; k++) {
+    acc += PLACE[k](h, ny, n);
+    if (r >= acc * 0.6) continue;
+    const [s0, s1] = SCALE[k];
+    return {
+      kind: k, x: px, z: pz, h, s: s0 + (s1 - s0) * hash(i, j, 4),
+      // a slight random lean, any heading
+      ax: (hash(i, j, 5) - 0.5) * 0.12, ay: hash(i, j, 6) * Math.PI * 2, az: (hash(i, j, 7) - 0.5) * 0.12,
+    };
+  }
+  return null;
+}
+
+/** trunk radius (m) at the foot of a plant of each kind at scale 1 (bushes: none — one walks through them) */
+const TRUNK = [0.19, 0.28, 0];
+
+/** the trunks within `r` of (x, z): [x, z, radius] */
+export function trunksNear(x: number, z: number, r: number): [number, number, number][] {
+  const out: [number, number, number][] = [];
+  for (let j = Math.floor((z - r) / STEP); j <= Math.ceil((z + r) / STEP); j++)
+    for (let i = Math.floor((x - r) / STEP); i <= Math.ceil((x + r) / STEP); i++) {
+      const p = plantAt(i, j);
+      if (p && TRUNK[p.kind] > 0 && Math.hypot(p.x - x, p.z - z) < r) out.push([p.x, p.z, TRUNK[p.kind] * p.s]);
+    }
+  return out;
+}
+
 /** instance matrices of every plant in the square [x0, x0+size) × [z0, z0+size) */
 export function placeVegetation(x0: number, z0: number, size: number): Float32Array[] {
   const out: number[][] = [[], [], []];
   const i0 = Math.ceil(x0 / STEP), i1 = Math.ceil((x0 + size) / STEP), j0 = Math.ceil(z0 / STEP), j1 = Math.ceil((z0 + size) / STEP);
   for (let j = j0; j < j1; j++)
     for (let i = i0; i < i1; i++) {
-      const px = (i + hash(i, j, 1) - 0.5) * STEP, pz = (j + hash(i, j, 2) - 0.5) * STEP;
-      const h = terrainHeight(px, pz);
-      if (h < VEG_MIN_H) continue;
-      const e = 0.8;
-      const nx = terrainHeight(px - e, pz) - terrainHeight(px + e, pz), nz = terrainHeight(px, pz - e) - terrainHeight(px, pz + e);
-      const ny = (2 * e) / Math.hypot(nx, 2 * e, nz);
-      const n = fbm(px / 30, pz / 30, 3);
-      const r = hash(i, j, 3);
-      let acc = 0;
-      for (let k = 0; k < VEG_KINDS; k++) {
-        acc += PLACE[k](h, ny, n);
-        if (r >= acc * 0.6) continue;
-        const [s0, s1] = SCALE[k];
-        const s = s0 + (s1 - s0) * hash(i, j, 4);
-        // Euler XYZ (three's default): a slight random lean, any heading
-        const ax = (hash(i, j, 5) - 0.5) * 0.12, ay = hash(i, j, 6) * Math.PI * 2, az = (hash(i, j, 7) - 0.5) * 0.12;
-        const a = Math.cos(ax), b = Math.sin(ax), c = Math.cos(ay), d = Math.sin(ay), ee = Math.cos(az), f = Math.sin(az);
-        const ae = a * ee, af = a * f, be = b * ee, bf = b * f;
-        out[k].push(
-          c * ee * s, (af + be * d) * s, (bf - ae * d) * s, 0,
-          -c * f * s, (ae - bf * d) * s, (be + af * d) * s, 0,
-          d * s, -b * c * s, a * c * s, 0,
-          px, h - 0.15, pz, 1,
-        );
-        break;
-      }
+      const p = plantAt(i, j);
+      if (!p) continue;
+      const s = p.s;
+      // Euler XYZ (three's default)
+      const a = Math.cos(p.ax), b = Math.sin(p.ax), c = Math.cos(p.ay), d = Math.sin(p.ay), ee = Math.cos(p.az), f = Math.sin(p.az);
+      const ae = a * ee, af = a * f, be = b * ee, bf = b * f;
+      out[p.kind].push(
+        c * ee * s, (af + be * d) * s, (bf - ae * d) * s, 0,
+        -c * f * s, (ae - bf * d) * s, (be + af * d) * s, 0,
+        d * s, -b * c * s, a * c * s, 0,
+        p.x, p.h - 0.15, p.z, 1,
+      );
     }
   return out.map((a) => new Float32Array(a));
 }

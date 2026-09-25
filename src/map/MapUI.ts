@@ -22,7 +22,10 @@ export class MapUI {
   private bigDirty = true;
   private lastVersion = -1;
   private lastBoat = { x: Infinity, z: Infinity };
+  private shipAt = { x: Infinity, z: Infinity };
   private boat = { x: 0, z: 0, heading: 0 };
+  /** the sailor ashore (null aboard): the chart follows him */
+  private walker: { x: number; z: number } | null = null;
 
   constructor(private readonly discovery: Discovery, private readonly seed: number) {
     this.chart = new ChartRenderer(discovery);
@@ -113,16 +116,20 @@ export class MapUI {
   }
 
   center(): void {
-    this.view.cx = this.boat.x;
-    this.view.cz = this.boat.z;
+    const me = this.walker ?? this.boat;
+    this.view.cx = me.x;
+    this.view.cz = me.z;
     this.bigDirty = true;
   }
 
-  update(dt: number, boat: { x: number; z: number; heading: number }): void {
+  /** `walker`: where the sailor is when ashore (the minimap centres on him; the ship is drawn where she lies) */
+  update(dt: number, boat: { x: number; z: number; heading: number }, walker: { x: number; z: number } | null = null): void {
     this.boat = boat;
-    const moved = Math.hypot(boat.x - this.lastBoat.x, boat.z - this.lastBoat.z) > 4;
+    this.walker = walker;
+    const me = walker ?? boat;
+    const moved = Math.hypot(me.x - this.lastBoat.x, me.z - this.lastBoat.z) > 4 || Math.hypot(boat.x - this.shipAt.x, boat.z - this.shipAt.z) > 4;
     const discovered = this.discovery.version !== this.lastVersion;
-    if (moved || discovered) { this.lastBoat = { x: boat.x, z: boat.z }; this.lastVersion = this.discovery.version; this.miniDone = false; this.bigDirty = true; }
+    if (moved || discovered) { this.lastBoat = { x: me.x, z: me.z }; this.shipAt = { x: boat.x, z: boat.z }; this.lastVersion = this.discovery.version; this.miniDone = false; this.bigDirty = true; }
 
     if (this.open) {
       const dpr = this.dpr;
@@ -131,7 +138,7 @@ export class MapUI {
       if (this.bigDirty && w > 0) {
         const ctx = this.big.getContext('2d')!;
         const done = this.chart.render(ctx, { ...this.view, mpp: this.view.mpp, w, h }, {
-          boat, labels: true, scaleBar: true, shape: 'rect', seed: this.seed, title: 'Mapa Mórz Odkrytych',
+          boat, walker: walker ?? undefined, labels: true, scaleBar: true, shape: 'rect', seed: this.seed, title: 'Mapa Mórz Odkrytych',
           rose: { x: w * 0.14, y: h * 0.8, r: Math.min(w, h) * 0.07 },
         }, 6);
         this.bigDirty = !done;
@@ -148,7 +155,7 @@ export class MapUI {
     if (!size) return;
     if (this.mini.width !== size) { this.mini.width = this.mini.height = size; }
     const ctx = this.mini.getContext('2d')!;
-    this.miniDone = this.chart.render(ctx, { cx: boat.x, cz: boat.z, mpp: (2 * MINI_RADIUS_M) / size, w: size, h: size },
-      { boat, shape: 'circle', seed: this.seed + 1 }, 2);
+    this.miniDone = this.chart.render(ctx, { cx: me.x, cz: me.z, mpp: (2 * MINI_RADIUS_M) / size, w: size, h: size },
+      { boat, walker: walker ?? undefined, shape: 'circle', seed: this.seed + 1 }, 2);
   }
 }

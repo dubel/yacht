@@ -5,7 +5,7 @@
  * Browsers only allow audio after a user gesture, so the context starts on the first click / key press.
  */
 
-import { playFootstep } from './footsteps';
+import { playFootstep, playGroundStep } from './footsteps';
 import { playSplash } from './water';
 import { playCannon, playImpact } from './guns';
 import { playCock, playFlint, playPistol, playSwoosh, playWoodHit } from './smallarms';
@@ -25,6 +25,8 @@ export interface AudioState {
   /** 0 open water … 1 right at a beach */
   shore: number;
   waves: number;
+  /** 1 aboard … 0 ashore: the hull's creaks, the rigging's whistle and the water along her side fall away */
+  aboard?: number;
 }
 
 export interface ThunderEvent {
@@ -202,6 +204,20 @@ export class AudioSystem {
     playFootstep(ctx, this.muffle, this.noise, ctx.currentTime + 0.005, { pace, weight, pan: this.foot * 0.12, motion: Math.min(1, this.motion * 8) });
   }
 
+  /** a footfall ashore: in sand, in grass, or wading (a slosh, deeper the more water) */
+  groundStep(pace: number, ground: 'sand' | 'grass' | 'water', weight = 1, wade = 0): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    this.foot = -this.foot;
+    if (ground === 'water') {
+      const name = (['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)];
+      const deep = Math.min(1, wade / 1.1);
+      this.play(name, (0.12 + 0.25 * deep) * (0.7 + 0.5 * pace) * weight, { pan: this.foot * 0.15, rate: 1.9 - 0.7 * deep + Math.random() * 0.2, lowpass: 2500 + 3000 * (1 - deep) });
+      return;
+    }
+    playGroundStep(ctx, this.muffle, this.noise, ctx.currentTime + 0.005, { pace, weight, pan: this.foot * 0.12, ground });
+  }
+
   /** the brass tube slides out (open) or in, and seats with a click */
   spyglass(open: boolean): void {
     const ctx = this.ctx;
@@ -330,6 +346,30 @@ export class AudioSystem {
     this.play('splash-big', 0.8 * near, { pan: pan * 0.8, rate: 1.15, lowpass: 2000 + 9000 * near });
   }
 
+  /** the anchor let go: the hemp cable running out through the hawse — a rushing rumble that slows as it lies down */
+  cableOut(pan: number, distance: number, seconds = 2.4): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const near = Math.min(1, 20 / (distance + 5));
+    const t = ctx.currentTime + 0.01, end = t + seconds + 0.4;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise; src.loop = true; src.start(t, Math.random() * 2); src.stop(end);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.Q.value = 1.2;
+    bp.frequency.setValueAtTime(460, t); bp.frequency.linearRampToValueAtTime(230, t + seconds);
+    // the rope's lay rubbing over the hawse lip: a flutter that slows with the cable
+    const am = ctx.createGain(); am.gain.value = 0.5;
+    const lfo = ctx.createOscillator();
+    lfo.frequency.setValueAtTime(24, t); lfo.frequency.linearRampToValueAtTime(6, t + seconds);
+    const lg = ctx.createGain(); lg.gain.value = 0.5;
+    lfo.connect(lg).connect(am.gain); lfo.start(t); lfo.stop(end);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.55 * near, t + 0.08);
+    g.gain.setTargetAtTime(0, t + seconds * 0.6, seconds * 0.22);
+    const pn = ctx.createStereoPanner(); pn.pan.value = pan * 0.8;
+    src.connect(bp).connect(am).connect(g).connect(pn).connect(this.muffle);
+  }
+
   /** one click of the capstan's pawl, and now and then the groan of the cable */
   capstan(): void {
     const ctx = this.ctx;
@@ -419,6 +459,7 @@ export class AudioSystem {
     const ctx = this.ctx;
     if (!ctx) return;
     this.motion = s.motion;
+    const aboard = s.aboard ?? 1;
     const t = ctx.currentTime;
     const set = (p: AudioParam, v: number, tc = 0.3) => p.setTargetAtTime(v, t, tc);
     const loop = (n: LoopName, v: number) => { const l = this.loops.get(n); if (l) set(l.gain.gain, v, 0.6); };
@@ -430,7 +471,7 @@ export class AudioSystem {
     const w = s.windSpeed;
     set(this.wind.gain.gain, air * 0.05 * Math.pow(w / 8, 2.2), 0.25);
     set(this.wind.band.frequency, 260 + w * 38, 0.4);
-    set(this.whistle.gain.gain, air * 0.018 * Math.max(0, (w - 9) / 8) * (0.6 + 0.4 * Math.sin(t * 0.7)), 0.3);
+    set(this.whistle.gain.gain, aboard * air * 0.018 * Math.max(0, (w - 9) / 8) * (0.6 + 0.4 * Math.sin(t * 0.7)), 0.3);
     set(this.whistle.band.frequency, 850 + w * 45 + 120 * Math.sin(t * 0.37), 0.5);
     set(this.rush.gain.gain, 0.09 * Math.pow(Math.min(s.speed, 7) / 4, 1.6), 0.3);
     set(this.rush.low.frequency, 450 + s.speed * 160, 0.3);
@@ -438,17 +479,17 @@ export class AudioSystem {
     set(this.flog.lfo.frequency, 5 + w * 0.35, 0.5);
 
     loop('ocean', 0.12 + 0.55 * s.shore + 0.12 * Math.max(0, s.waves - 1));
-    loop('lapping', 0.35 * (1 - Math.min(1, s.speed / 4)) + 0.1);
+    loop('lapping', (0.35 * (1 - Math.min(1, s.speed / 4)) + 0.1) * (0.3 + 0.7 * aboard));
     loop('rain-light', air * Math.min(1, s.rain * 2) * (1 - s.rain) * 0.9 + air * 0.25 * s.rain);
     loop('rain-heavy', air * Math.max(0, s.rain - 0.3) * 1.1);
     loop('crickets', air * 0.5 * s.night * s.shore * (1 - s.rain));
-    loop('creak-loop', 0.05 + Math.min(0.5, s.motion * 1.6) * (0.5 + 0.2 * s.waves));
+    loop('creak-loop', aboard * (0.05 + Math.min(0.5, s.motion * 1.6) * (0.5 + 0.2 * s.waves)));
 
     // occasional one-shots
     this.creakT -= dt;
     if (this.creakT <= 0) {
       this.creakT = 2 + Math.random() * 6;
-      if (s.motion > 0.04) this.play('creak-1', Math.min(0.6, 0.2 + s.motion * 2), { rate: 0.7 + Math.random() * 0.4, pan: Math.random() - 0.5 });
+      if (s.motion > 0.04 && aboard > 0.5) this.play('creak-1', Math.min(0.6, 0.2 + s.motion * 2), { rate: 0.7 + Math.random() * 0.4, pan: Math.random() - 0.5 });
     }
   }
 }

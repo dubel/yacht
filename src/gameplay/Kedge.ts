@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import type { BoatPhysics } from '../physics/BoatPhysics';
 import type { WaveField } from '../environment/WaveField';
 import { terrainHeight } from '../world/WorldGen';
+import { fadeThrough } from './fade';
 
 /*
  * Kedging off a shoal. When the ship has gone aground and stopped, the crew can take the kedge anchor out
@@ -48,7 +49,6 @@ export class Kedge {
   private readonly buoy: THREE.Group;
   private readonly rope: THREE.Mesh;
   private readonly prompt = document.createElement('div');
-  private readonly fade = document.createElement('div');
   private readonly n = { height: 0, nx: 0, ny: 1, nz: 0, vy: 0 };
 
   constructor(private readonly body: BoatPhysics, private readonly hooks: KedgeHooks, private readonly track: () => number[][]) {
@@ -68,8 +68,7 @@ export class Kedge {
     this.prompt.id = 'kedge';
     this.prompt.hidden = true;
     this.prompt.innerHTML = 'Osiedliśmy na mieliźnie! &nbsp;<kbd>K</kbd> — wywieźć kotwicę i ściągnąć statek';
-    this.fade.id = 'fade';
-    document.body.append(this.prompt, this.fade);
+    document.body.append(this.prompt);
   }
 
   /** once per frame; `kPressed`: the K key this frame */
@@ -197,15 +196,13 @@ export class Kedge {
   /** hurry it up (K again, or she won't come): a fade over putting her in the anchor's water */
   private hurry(): void {
     this.hurrying = true;
-    this.fade.classList.add('on');
-    setTimeout(() => {
+    fadeThrough(() => {
       const a = this.anchor;
       // head away from the shoal
       this.body.reset(new THREE.Vector3(a.x, 0, a.z), Math.PI - this.away, 0);
       this.hurrying = false;
       this.finish('Ściągnęliśmy statek z mielizny.');
-      setTimeout(() => this.fade.classList.remove('on'), 150);
-    }, 420);
+    });
   }
 
   private finish(msg: string): void {

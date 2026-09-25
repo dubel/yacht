@@ -26,6 +26,7 @@ import { Gulls } from '../life/Gulls';
 import { Dolphins } from '../life/Dolphins';
 import { Splash } from '../life/Splash';
 import { DeckWalker } from '../camera/DeckWalker';
+import { LandWalker } from '../camera/LandWalker';
 import { LENS_R, Spyglass } from '../camera/Spyglass';
 import { GunSight } from '../camera/GunSight';
 import { Guns } from '../combat/Guns';
@@ -33,6 +34,8 @@ import { Artillery, RELOAD } from '../combat/Artillery';
 import { Musketry } from '../combat/Musketry';
 import { Weapons } from '../fpv/Weapons';
 import { Kedge } from '../gameplay/Kedge';
+import { Anchor } from '../gameplay/Anchor';
+import { Landing } from '../gameplay/Landing';
 import { Leadsman } from '../gameplay/Leadsman';
 import { Music, type Mood } from '../audio/Music';
 import { terrainHeight as landAt } from '../world/WorldGen';
@@ -93,6 +96,14 @@ export class Game {
   walker!: DeckWalker;
   /** first-person view from the deck (F) */
   onDeck = false;
+  /** the sailor ashore (rowed there from the ship at anchor, B) */
+  land!: LandWalker;
+  landing!: Landing;
+  get ashore(): boolean { return this.landing?.ashore ?? false; }
+  /** first person: on deck or ashore */
+  get fpv(): boolean { return this.onDeck || this.ashore; }
+  private deepSaid = -Infinity;
+  private revealT = 0;
   readonly spyglass = new Spyglass();
   guns!: Guns;
   readonly artillery = new Artillery();
@@ -100,6 +111,7 @@ export class Game {
   readonly weapons = new Weapons();
   musketry!: Musketry;
   kedge!: Kedge;
+  anchor!: Anchor;
   readonly leadsman = new Leadsman();
   readonly music = new Music();
   private landNear = true;
@@ -219,7 +231,7 @@ export class Game {
     this.weapons.onReady = () => this.audio.cock();
     this.weapons.onSlash = (cut) => this.audio.swoosh(cut === 0 ? 0.3 : -0.3);
     this.weapons.onPistol = (muzzle, dir) => {
-      this.musketry.fire(muzzle, dir, this.physics.velocity);
+      this.musketry.fire(muzzle, dir, this.ashore ? new THREE.Vector3() : this.physics.velocity);
       this.artillery.pistolSmoke(muzzle, dir);
     };
     this.musketry.onHit = (kind, at) => {
@@ -261,6 +273,39 @@ export class Game {
       done: (hours) => { this.clock.advance(hours); this.clouds.skip(hours * 3600, { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed }); },
     }, () => this.discovery.track);
     this.scene.add(this.kedge.group);
+    // Z: come to anchor off an island (and weigh it again)
+    this.anchor = new Anchor(this.physics, {
+      say: (text, s) => this.messages.say(text, s),
+      letGo: (at) => {
+        const h = this.heardFrom(at.x, at.z);
+        this.audio.anchorDrop(h.pan, h.d);
+        this.audio.cableOut(h.pan, h.d);
+        this.splash.burst(at.x, 0.1, at.z, 25, 4);
+        this.ripples.disturb(at.x, at.z, 0.8, 0.12);
+      },
+      capstan: () => this.audio.capstan(),
+      hawse: (out) => out.set(0, this.boat.info.deckHeight * 0.7, this.boat.info.hullBow - 0.6).applyMatrix4(this.boat.root.matrixWorld),
+    });
+    this.scene.add(this.anchor.group);
+    // ashore: walking the island, and the jolly boat that takes him there and back
+    this.land = new LandWalker();
+    this.land.onStep = (pace, ground, wade) => this.audio.groundStep(pace, ground, 1, wade);
+    this.land.onLand = (h) => this.audio.groundStep(0.5, this.land.ground(), 1 + Math.min(1.2, h * 1.6), this.land.wade);
+    this.land.onJump = () => this.audio.groundStep(0.8, this.land.ground(), 0.8, this.land.wade);
+    this.land.onDeep = () => {
+      if (this.time - this.deepSaid < 6) return;
+      this.deepSaid = this.time;
+      this.messages.say('Dalej nie — jak większość marynarzy, nie umiesz pływać.', 3);
+    };
+    this.landing = new Landing({
+      say: (text, s) => this.messages.say(text, s),
+      oar: (at) => { const h = this.heardFrom(at.x, at.z); this.audio.oar(h.pan, h.d); },
+      goAshore: (stand, yaw) => this.goAshore(stand, yaw),
+      comeAboard: () => this.setOnDeck(true),
+      hours: (h) => { this.clock.advance(h); this.clouds.skip(h * 3600, { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed }); },
+    });
+    this.land.obstacles = this.landing.obstacles;
+    this.scene.add(this.landing.group);
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
     this.scene.add(this.fish.mesh, this.gulls.mesh);
     this.gulls.onCall = (pan, d) => this.audio.gull(pan, d);
@@ -330,14 +375,16 @@ export class Game {
     if (inp.wasPressed('F1') || inp.wasPressed('Backquote')) this.debug.toggle();
     const fkeys: [string, ViewMode][] = [['F2', 'final'], ['F3', 'normals'], ['F4', 'caustics'], ['F5', 'reflection'], ['F6', 'depth'], ];
     for (const [k, v] of fkeys) if (inp.wasPressed(k)) this.view = v;
-    if (inp.wasPressed('KeyR')) this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, 0);
+    if (inp.wasPressed('KeyR') && this.ashore) this.messages.say('Najpierw wróć na statek (szalupą, B).', 3);
+    else if (inp.wasPressed('KeyR')) this.physics.reset(new THREE.Vector3(0, 0, 0), START_BEARING, 0);
     // F8 (or H): the controls panel on / off
     if (inp.wasPressed('F8') || inp.wasPressed('KeyH')) this.hud.toggleHelp();
-    if (inp.wasPressed('KeyV') && !this.onDeck) this.cam.toggleDive();
-    if (inp.wasPressed('KeyF')) this.setOnDeck(!this.onDeck);
+    if (inp.wasPressed('KeyV') && !this.fpv) this.cam.toggleDive();
+    if (inp.wasPressed('KeyF') && this.ashore) this.messages.say('Jesteś na lądzie — wróć do szalupy (B).', 3);
+    else if (inp.wasPressed('KeyF')) this.setOnDeck(!this.onDeck);
     // guns: from the chase camera, left Ctrl fires the port broadside, right Ctrl the starboard one
     const ctrlL = inp.wasPressed('ControlLeft'), ctrlR = inp.wasPressed('ControlRight');
-    if (!this.onDeck && !this.map.open && (ctrlL || ctrlR)) this.broadside(ctrlL ? 'port' : 'starboard');
+    if (!this.fpv && !this.map.open && (ctrlL || ctrlR)) this.broadside(ctrlL ? 'port' : 'starboard');
     // on deck: Ctrl at a gun mans it; manning, Ctrl or a click fires, walking away (or Esc) leaves it
     if (this.onDeck && !this.map.open) {
       if (this.gunSight.active) {
@@ -352,13 +399,13 @@ export class Game {
     // 1 pistol, 2 rapier, 3 lantern (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
     const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit3') ? 'lantern' : inp.wasPressed('Digit0') ? 'spyglass' : null;
     if (slot && !this.map.open) {
-      if (!this.onDeck) this.setOnDeck(true);
+      if (!this.fpv) this.setOnDeck(true);
       if (this.gunSight.active) this.gunSight.exit();
       if (slot === 'spyglass') { this.weapons.holster(); this.spyglass.toggle(); }
       else { this.spyglass.close(); this.weapons.select(slot); }
     }
     // L: the spyglass (from the chase camera it first takes you on deck)
-    if (inp.wasPressed('KeyL')) { if (!this.onDeck) this.setOnDeck(true); this.spyglass.toggle(); }
+    if (inp.wasPressed('KeyL')) { if (!this.fpv) this.setOnDeck(true); this.spyglass.toggle(); }
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
     if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
@@ -422,6 +469,11 @@ export class Game {
     }
     this.messages.update(stepDt);
     this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
+    this.anchor.update(stepDt, this.input.wasPressed('KeyZ') && !this.ashore, this.wind.speed, this.kedge.state !== 'afloat');
+    this.landing.update(stepDt, {
+      canGo: this.onDeck && this.anchor.riding && !this.gunSight.active, ship: body.origin,
+      sailor: this.ashore ? this.land.pos : null, b: this.input.wasPressed('KeyB') && !this.map.open,
+    });
     // a squall coming on: the call to strike sail; laid over past ~78°: the crew lets everything fly
     if (this.weather.kind !== this.lastWeather) {
       if (this.weather.kind === 'squall') this.messages.say('Biały szkwał! Zrzucić żagle (X)!', 5);
@@ -461,10 +513,15 @@ export class Game {
       this.artillery.update(stepDt, t, this.waves, wv, cam, this.pipeline.sceneDepth, new THREE.Vector2(this.pipeline.width, this.pipeline.height), sun, sky);
     }
     this.discovery.update(dt, body.origin.x, body.origin.z);
-    this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading });
+    // ashore, the map follows him and charts what he walks
+    this.revealT -= dt;
+    if (this.ashore && this.revealT <= 0) { this.revealT = 1; this.discovery.revealAt(this.land.pos.x, this.land.pos.y, 150); }
+    this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading }, this.ashore ? { x: this.land.pos.x, z: this.land.pos.y } : null);
 
     // --- camera ---
     const focus = body.origin.clone();
+    // where the player is (the ship, or him ashore): shadows, the sound of the shore
+    const here = this.ashore ? new THREE.Vector3(this.land.pos.x, this.land.footY, this.land.pos.y) : focus;
     if (Config.freeCam) {
       const c = Config.freeCam;
       this.cam.camera.position.set(c[0], c[1], c[2]);
@@ -482,6 +539,20 @@ export class Game {
         this.gunHint.hidden = true;
         this.weapons.overlay.visible = false;
         this.weapons.hideHud();
+      } else if (this.ashore) {
+        const sg = this.spyglass;
+        sg.update(dt, this.input, !this.map.open);
+        this.land.scope = sg.raise;
+        this.land.magnification = sg.magnification;
+        this.land.tremor = sg.tremor();
+        this.land.update(dt, this.input, this.cam.camera);
+        const L = this.env.light;
+        this.weapons.update(dt, this.input, this.cam.camera, this.land.stride, sg.raise > 0.08 || this.map.open,
+          this.env.lightDir, L.color, L.intensity, this.scene.environment);
+        this.weapons.markSpyglass(sg.raise > 0.3);
+        this.nearGun = -1;
+        this.guns.highlight(-1, t);
+        this.gunHint.hidden = true;
       } else if (this.onDeck) {
         const sg = this.spyglass;
         sg.update(dt, this.input, !this.map.open);
@@ -530,7 +601,7 @@ export class Game {
     this.caustics.update(this.env.lightDir);
 
     this.vegetation.update(t, this.wind.dir.x, this.wind.dir.z, this.wind.speed);
-    this.env.follow(focus);
+    this.env.follow(here);
 
     if (this.inspect) { this.renderInspect(); return this.input.endFrame(); }
     const cp = this.cam.camera.position;
@@ -541,12 +612,13 @@ export class Game {
 
     // ---- sound ----
     this.shoreT -= dt;
-    if (this.shoreT <= 0) { this.shoreT = 0.5; this.shore = this.shoreProximity(focus); }
+    if (this.shoreT <= 0) { this.shoreT = 0.5; this.shore = this.shoreProximity(here); }
     const av = body.angVel;
+    const aboard = !this.ashore;
     this.audio.update(dt, {
-      windSpeed: this.wind.speed, rain: wp.rain, speed: body.speed, motion: Math.hypot(av.x, av.z),
-      luffing: body.luffing, sailsUp: body.sailsUp, submerged, night: this.env.night, shore: this.shore,
-      waves: wp.waves,
+      windSpeed: this.wind.speed, rain: wp.rain, speed: aboard ? body.speed : 0, motion: aboard ? Math.hypot(av.x, av.z) : 0,
+      luffing: aboard && body.luffing, sailsUp: body.sailsUp, submerged, night: this.env.night, shore: this.shore,
+      waves: wp.waves, aboard: aboard ? 1 : 0,
     });
 
     this.music.update(dt, this.musicMood(dt), this.audio.started, this.audio.muted);
@@ -607,7 +679,7 @@ export class Game {
   /** which music fits the moment: weather, time of day, where the ship is, what the crew is doing */
   private musicMood(dt: number): Mood {
     const k = this.kedge?.state;
-    if (k === 'rowing' || k === 'hauling') return 'haul';
+    if (k === 'rowing' || k === 'hauling' || this.anchor?.state === 'weighing') return 'haul';
     const w = this.weather.p;
     if (w.lightning > 1 || w.wind > 12.5 || w.rain > 0.55) return 'storm';
     if (this.env.night > 0.35 || this.env.golden > 0.35) return 'dusk';
@@ -650,9 +722,25 @@ export class Game {
     cam.near = on ? 0.08 : 0.3;
     cam.updateProjectionMatrix();
     this.physics.wasd = !on;
+    this.physics.helm = true;
     this.input.wantLock = on;
     if (on) this.walker.spawn(this.boat.info.hullStern);
     else { this.input.unlock(); this.gunSight.exit(); this.weapons.stow(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+  }
+
+  /** rowed ashore: first person on the island; the ship is left to the crew (no helm from the beach) */
+  private goAshore(stand: THREE.Vector2, yaw: number): void {
+    this.onDeck = false;
+    this.gunSight.exit();
+    this.spyglass.close();
+    this.spyglass.raise = 0;
+    const cam = this.cam.camera;
+    cam.near = 0.08;
+    cam.updateProjectionMatrix();
+    this.physics.wasd = false;
+    this.physics.helm = false;
+    this.input.wantLock = true;
+    this.land.place(stand.x, stand.y, yaw);
   }
 
   /** is the top of the island at (x, z) visible from the eye, or does nearer land stand in the way? */
@@ -674,16 +762,16 @@ export class Game {
    * detail inside the lens, the round field in the post pass, and naming (and charting) what is in it.
    */
   private updateLens(dt: number): void {
-    const cam = this.cam.camera, sg = this.spyglass, mag = this.onDeck ? sg.magnification : 1;
+    const cam = this.cam.camera, sg = this.spyglass, mag = this.fpv ? sg.magnification : 1;
     const fov = (2 * Math.atan(Math.tan((55 * Math.PI) / 360) / mag) * 180) / Math.PI;
     if (Math.abs(cam.fov - fov) > 1e-4) { cam.fov = fov; cam.updateProjectionMatrix(); }
     const dir = cam.getWorldDirection(new THREE.Vector3());
     const halfAngle = Math.atan(Math.tan((fov * Math.PI) / 360) * cam.aspect);
     this.terrain.update(cam.position, undefined, mag > 1.01 ? { dir, halfAngle, zoom: mag } : undefined);
     this.water.uniforms.uLodScale.value = 1 / mag;
-    this.pipeline.post.scope = this.onDeck ? sg.raise : 0;
+    this.pipeline.post.scope = this.fpv ? sg.raise : 0;
     this.pipeline.post.scopeR = LENS_R;
-    if (!this.onDeck || sg.raise < 0.02) return;
+    if (!this.fpv || sg.raise < 0.02) return;
 
     // what is in the lens: the island nearest the centre of the field, if the haze lets it be seen
     this.scopeT -= dt;

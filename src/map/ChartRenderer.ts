@@ -30,6 +30,8 @@ export interface ChartView {
 
 export interface ChartOverlay {
   boat?: { x: number; z: number; heading: number };
+  /** the sailor ashore: a red dot in an inked ring ("you are here") */
+  walker?: { x: number; z: number };
   /** compass rose at this device-pixel position, with rhumb lines across the sheet */
   rose?: { x: number; y: number; r: number };
   labels?: boolean;
@@ -315,6 +317,18 @@ export class ChartRenderer {
       ctx.fill();
       ctx.stroke();
       ctx.restore();
+    }
+    if (o.walker) {
+      const wx = X(o.walker.x), wy = Y(o.walker.z);
+      ctx.beginPath();
+      ctx.arc(wx, wy, 4.5 * px, 0, Math.PI * 2);
+      ctx.strokeStyle = INK;
+      ctx.lineWidth = 1.2 * px;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(wx, wy, 2.2 * px, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgb(170, 30, 20)';
+      ctx.fill();
     }
 
     if (o.scaleBar) this.drawScale(ctx, w, h, mpp, px);
