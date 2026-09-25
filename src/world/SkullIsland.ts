@@ -3,7 +3,7 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { fbm } from '../core/noise';
-import { SKULL_ISLAND } from './WorldGen';
+import { SKULL_ISLAND, terrainHeight } from './WorldGen';
 
 /*
  * The Skull Island's cave (the island itself is in WorldGen: a wooded hill with a level plateau). On the
@@ -31,6 +31,8 @@ const GUARDS = 5;
 /** a guard's life, a ball's and a cut's toll of it (two balls, three cuts), and a guard's cut's toll of the sailor's */
 const GUARD_HP = 10, BALL_HURT = 5.5, CUT_HURT = 3.6, THEIR_CUT = 0.05;
 const RESPAWN_DAYS = 3;
+/** a guard's run (m/s), how far off he stops, his reach; the run's cycle (s) and the moment in it he stands in */
+const RUN = 2.6, STOP = 1.2, REACH = 1.9, RUN_CYCLE = 0.7, STANCE = 0.12;
 /** (listed in worldState.ts: a new world clears it) */
 const KEY = 'lagoon.skull';
 /** the two cuts, as where the sword hand goes from the shoulder (m, his frame: +z ahead, +x his left, +y up):
@@ -59,6 +61,8 @@ interface Guard {
   cut: number;
   /** his heading (rad), turned toward the sailor at a man's pace */
   yaw: number;
+  /** out of the passage, chasing him across the island: where he is (world x, z); null in the passage */
+  free: THREE.Vector2 | null;
   mats: THREE.MeshStandardMaterial[];
   state: GuardState;
   s: number;
@@ -92,6 +96,8 @@ export class SkullIsland {
   inside = false;
   private readonly samples: Sample[] = [];
   private sMouth = 0;
+  /** along the path: just out of the skull's mouth (where a guard leaves the passage to chase him outside) */
+  private sExit = 0;
   /** the stone skull before the mouth: its depth along the path, half its width, half its doorway's */
   private skullDepth = 0;
   private skullHalf = 0;
@@ -338,6 +344,7 @@ export class SkullIsland {
     // ~9 m across; its doorway leads straight into the passage's mouth
     const k = 9 / size.x;
     this.skullDepth = size.z * k;
+    this.sExit = Math.max(0, this.sMouth - this.skullDepth - 1.5);
     this.skullHalf = (size.x * k) / 2;
     const holder = new THREE.Group();
     model.position.set(-(box.min.x + box.max.x) / 2, -box.min.y, -(box.min.z + box.max.z) / 2);
@@ -451,7 +458,7 @@ export class SkullIsland {
       model.traverse((o) => { if ((o as THREE.Bone).isBone) { if (o.name.startsWith('R_shoulder')) arm = o as THREE.Bone; if (o.name.startsWith('R_forarm')) fore = o as THREE.Bone; if (o.name.startsWith('HandleBone')) hand = o as THREE.Bone; } });
       root.visible = false;
       this.group.add(root);
-      this.guards.push({ root, mixer, run, arm, mats, fore, hand, blade: hand ? bladeAxis(model, hand) : null, cut: 0, yaw: 0, state: 'waiting', s: spots[n], lat: 0, hp: GUARD_HP, t: 0, cool: 1, swing: 0, struck: false, flash: 0, spawnS: spots[n] });
+      this.guards.push({ root, mixer, run, arm, mats, fore, hand, blade: hand ? bladeAxis(model, hand) : null, cut: 0, yaw: 0, free: null, state: 'waiting', s: spots[n], lat: 0, hp: GUARD_HP, t: 0, cool: 1, swing: 0, struck: false, flash: 0, spawnS: spots[n] });
     }
   }
 
@@ -480,7 +487,8 @@ export class SkullIsland {
     this.inside = !!here;
     const wantDark = here ? THREE.MathUtils.smoothstep(here.s, this.sMouth + 1, this.sMouth + 9) : 0;
     this.dark += (wantDark - this.dark) * Math.min(1, dt * 2.5);
-    if (!here) this.respawnIfDue(false);
+    // (not with him in the passage, nor with a guard up and after him)
+    if (!here && !this.guards.some((g) => g.state === 'chasing' || g.state === 'rising')) this.respawnIfDue(false);
     this.updateTorches(eye, far);
     this.updateGuards(dt, feet, here);
     this.updateBones(dt);
@@ -536,30 +544,27 @@ export class SkullIsland {
       let rise = 0;
       if (g.state === 'rising') {
         rise = 1 - Math.min(1, g.t / 1.3);
-        g.run.timeScale = 0.2;
+        g.run.timeScale = 0;
+        g.run.time = STANCE;
         if (g.t > 1.3) g.state = 'chasing';
       } else if (g.state === 'chasing') {
         g.cool -= dt;
-        // run at him along the passage (and toward his side of it); he outside, wait in the dark
-        if (here) {
-          const ds = here.s - g.s, gap = Math.abs(ds);
-          const pr = this.profile(g.s);
-          g.lat += (THREE.MathUtils.clamp(here.lat, -(pr.hw - 0.6), pr.hw - 0.6) - g.lat) * Math.min(1, dt * 2);
-          const go = gap > 1.25 && g.swing === 0 ? Math.sign(ds) * Math.min(2.6 * dt, gap - 1.2) : 0;
-          g.s = THREE.MathUtils.clamp(g.s + go, this.sMouth + 1, this.sEnd - 1);
-          g.run.timeScale = go !== 0 ? 1.1 : 0.15;
-          const d = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
-          if (g.swing === 0 && g.cool <= 0 && d < 1.7) { g.swing = 0.001; g.struck = false; g.cut = 1 - g.cut; this.hooks.sound('swing', g.root.position); }
-        } else g.run.timeScale = 0.15;
+        let moving = false;
+        if (feet && g.swing === 0) moving = here ? this.chaseInside(g, here, dt) : this.chaseOutside(g, feet, dt);
+        // running, or standing his ground: the stride runs on to a stance (feet apart) and holds there
+        const phase = g.run.time % RUN_CYCLE;
+        g.run.timeScale = moving || Math.abs(phase - STANCE) > 0.04 ? 1.1 : 0;
+        const d = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
+        if (g.swing === 0 && g.cool <= 0 && d < REACH) { g.swing = 0.001; g.struck = false; g.cut = 1 - g.cut; this.hooks.sound('swing', g.root.position); }
         if (g.swing > 0) {
           g.swing = this.debugSwing ?? g.swing + dt / 0.85;
           // the blow lands as the blade comes down through the middle of the cut, if he is still in reach
           if (!g.struck && g.swing > 0.6) {
             g.struck = true;
-            const d = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
-            if (d < 2.1) this.hooks.hurt(THEIR_CUT);
+            const d2 = feet ? Math.hypot(feet.x - g.root.position.x, feet.z - g.root.position.z) : 99;
+            if (d2 < REACH + 0.4) this.hooks.hurt(THEIR_CUT);
           }
-          if (g.swing >= 1) { g.swing = 0; g.cool = 1.1 + Math.random() * 0.6; }
+          if (g.swing >= 1) { g.swing = 0; g.cool = 0.7 + Math.random() * 0.6; }
         }
       } else if (g.state === 'dying') {
         rise = 0;
@@ -567,9 +572,12 @@ export class SkullIsland {
         g.root.scale.set(1, 1 - 0.9 * k, 1);
         if (g.t > 0.45) { g.state = 'dead'; g.root.visible = false; }
       }
-      const at = this.here;
-      this.lerpAt(g.s, at);
-      g.root.position.set(at.p.x + at.n.x * g.lat, FLOOR + 0.04 - rise * 1.9, at.p.z + at.n.z * g.lat);
+      if (g.free) g.root.position.set(g.free.x, terrainHeight(g.free.x, g.free.y) + 0.04 - rise * 1.9, g.free.y);
+      else {
+        const at = this.here;
+        this.lerpAt(g.s, at);
+        g.root.position.set(at.p.x + at.n.x * g.lat, FLOOR + 0.04 - rise * 1.9, at.p.z + at.n.z * g.lat);
+      }
       // face him (or down the passage toward the mouth), turning at a man's pace
       const look = feet ? this.v.set(feet.x - g.root.position.x, 0, feet.z - g.root.position.z) : this.v.copy(sm.t).negate();
       if (look.lengthSq() > 1e-4) {
@@ -582,13 +590,61 @@ export class SkullIsland {
     }
   }
 
+  /** in the passage he runs at him along it (and toward his side of it); true while running */
+  private chaseInside(g: Guard, here: { s: number; lat: number }, dt: number): boolean {
+    if (g.free) {
+      // coming back in after him: to the way in, then along the passage
+      const e = this.sample(this.sExit).p;
+      if (!this.runTo(g, e.x, e.z, 0.4, dt)) { g.free = null; g.s = this.sExit; g.lat = 0; }
+      return true;
+    }
+    const ds = here.s - g.s, gap = Math.abs(ds);
+    const pr = this.profile(g.s);
+    g.lat += (THREE.MathUtils.clamp(here.lat, -(pr.hw - 0.6), pr.hw - 0.6) - g.lat) * Math.min(1, dt * 3);
+    // (a few cm of slack, or he would twitch forward every frame, running on the spot)
+    const go = gap > STOP + 0.08 ? Math.sign(ds) * Math.min(RUN * dt, gap - STOP) : 0;
+    g.s = THREE.MathUtils.clamp(g.s + go, this.sExit, this.sEnd - 1);
+    return go !== 0;
+  }
+
+  /**
+   * He has gone out: the guard that has risen goes after him — out along the passage and through the skull's
+   * mouth, then across the island straight at him, round the rocks — until one of them is dead.
+   */
+  private chaseOutside(g: Guard, feet: THREE.Vector3, dt: number): boolean {
+    if (!g.free) {
+      if (g.s > this.sExit + 0.05) {
+        g.lat += (0 - g.lat) * Math.min(1, dt * 3);
+        g.s = Math.max(this.sExit, g.s - RUN * dt);
+        return true;
+      }
+      const p = this.sample(this.sExit).p;
+      g.free = new THREE.Vector2(p.x, p.z);
+    }
+    return this.runTo(g, feet.x, feet.z, STOP, dt);
+  }
+
+  /** in the open: a step toward (x, z), stopping `stop` short; sliding round rock, never into the sea. False: there */
+  private runTo(g: Guard, x: number, z: number, stop: number, dt: number): boolean {
+    const f = g.free!, dx = x - f.x, dz = z - f.y, d = Math.hypot(dx, dz);
+    if (d <= stop + 0.08) return false;
+    const step = Math.min(RUN * dt, d - stop), ux = dx / d, uz = dz / d;
+    const ok = (px: number, pz: number) => this.where(px, pz) !== 'rock' && terrainHeight(px, pz) > -0.4;
+    // straight on, or veering either way round what is in the way
+    for (const a of [0, 0.5, -0.5, 1, -1, 1.5, -1.5]) {
+      const c = Math.cos(a), s = Math.sin(a), vx = ux * c - uz * s, vz = ux * s + uz * c;
+      if (ok(f.x + vx * step, f.y + vz * step)) { f.x += vx * step; f.y += vz * step; return true; }
+    }
+    return false;
+  }
+
   private cutPose(g: Guard): void {
     if (g.arm && g.fore && g.hand) swingArm(g.root, g.arm, g.fore, g.hand, g.yaw, g.swing, g.cut, g.blade ?? undefined);
   }
 
   /** a ball from a to b: into a guard (true, and where), or into the passage's rock */
   shoot(a: THREE.Vector3, b: THREE.Vector3): { at: THREE.Vector3; kind: 'bone' | 'land' } | null {
-    if (!this.loaded || Math.hypot(a.x - C.x, a.z - C.y) > 60) return null;
+    if (!this.loaded || Math.hypot(a.x - C.x, a.z - C.y) > 400) return null;
     for (const g of this.guards) {
       if (g.state !== 'chasing' && g.state !== 'rising') continue;
       // the guard as an upright capsule: its axis from the hips to the head
@@ -715,6 +771,7 @@ export class SkullIsland {
       g.s = g.spawnS;
       g.lat = 0;
       g.swing = 0;
+      g.free = null;
     }
     this.next = this.state.dead.findIndex((d) => !d);
     if (this.next < 0) this.next = GUARDS;
