@@ -141,6 +141,9 @@ export interface Pistol {
  * A flintlock pistol of the early 18th century: walnut stock, the lock on the right, a grotesque mask on the
  * butt cap. One shot, then loading it again — powder, ball, ramrod, priming the pan.
  */
+/** how much more upright than the butt the hand holds it (rad), and how far up the butt (0 low … 1 under the lock) */
+const FLINT_UPRIGHT = 0.17, FLINT_HOLD = 0.75;
+
 export async function makeFlintlock(): Promise<Pistol> {
   const m = await load('flintlock');
   // (model: metres, the muzzle toward −x, the lock on the −z side, one mesh — the cock cut out of it)
@@ -158,7 +161,10 @@ export async function makeFlintlock(): Promise<Pistol> {
   group.add(muzzle);
   // the grip: the butt, rising forward to the lock; held high, the palm on its right (+X)
   const g0 = toGroup(new THREE.Vector3(0.112, -0.058, 0)), g1 = toGroup(new THREE.Vector3(0.058, -0.008, 0));
-  const grip = gripFrame(g0.clone().lerp(g1, 1.0), g1.clone().sub(g0), new THREE.Vector3(1, 0, 0));
+  // (the butt is raked more than a hand likes to hold it: the hand closes on it a little more upright and
+  //  lower down, so the forearm runs low and the wrist is barely bent — as it is on the revolver)
+  const axis = g1.clone().sub(g0).normalize().applyAxisAngle(new THREE.Vector3(1, 0, 0), FLINT_UPRIGHT);
+  const grip = gripFrame(g0.clone().lerp(g1, FLINT_HOLD), axis, new THREE.Vector3(1, 0, 0));
   group.add(grip);
   return {
     group, muzzle, grip, chambers: 1, hang: 0.085, reload: 3,

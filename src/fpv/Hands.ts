@@ -60,6 +60,10 @@ export class Hands {
   private readonly gripCache = new WeakMap<Grasp, { k: number; frame: THREE.Matrix4 }>();
   private upperLen = 0.25;
   private foreLen = 0.28;
+  /** at rest (the wrist straight): the forearm's way back from the wrist, in the hand's frame, and the hand's
+   *  turn relative to the forearm (for spreading a twist along it) */
+  private readonly foreInHand = new THREE.Vector3(0, -1, 0);
+  private readonly handInFore = new THREE.Quaternion();
   private readonly m = new THREE.Matrix4();
   private readonly v = new THREE.Vector3();
   private readonly q = new THREE.Quaternion();
@@ -94,6 +98,10 @@ export class Hands {
     const pos = (n: string) => this.bone(n).getWorldPosition(new THREE.Vector3());
     this.upperLen = pos(B.shoulder).distanceTo(pos(B.elbow));
     this.foreLen = pos(B.elbow).distanceTo(pos(B.wrist));
+    const qHand = this.bone(B.hand).getWorldQuaternion(new THREE.Quaternion());
+    const qFore = this.bone(B.twist).getWorldQuaternion(new THREE.Quaternion());
+    this.foreInHand.copy(pos(B.elbow).sub(pos(B.wrist)).normalize().applyQuaternion(qHand.clone().invert()));
+    this.handInFore.copy(qFore.invert().multiply(qHand));
     // the left arm and hand folded away to nothing
     for (const n of [B.lShoulder, B.lHand]) this.bone(n).scale.setScalar(1e-4);
     this.loaded = true;
@@ -210,17 +218,36 @@ export class Hands {
       sh.updateWorldMatrix(false, true);
       S = moved;
     }
-    const eye = this.root.matrixWorld;
-    const pole = ELBOW_POLE.clone().transformDirection(eye);
     const toW = W.clone().sub(S);
     const d = THREE.MathUtils.clamp(toW.length(), 0.05, this.upperLen + this.foreLen - 1e-3);
     const dir = toW.normalize();
     const a = (this.upperLen ** 2 - this.foreLen ** 2 + d * d) / (2 * d);
     const h = Math.sqrt(Math.max(0, this.upperLen ** 2 - a * a));
-    const side = pole.addScaledVector(dir, -pole.dot(dir)).normalize();
+    // the elbow: where the forearm would lie with the wrist straight (back from the wrist along the hand), as
+    // near as the arm can bring it — leaning a little to the natural down-and-out
+    const qHand = hand.getWorldQuaternion(new THREE.Quaternion());
+    const straight = W.clone().addScaledVector(this.foreInHand.clone().applyQuaternion(qHand), this.foreLen).sub(S);
+    const toStraight = straight.addScaledVector(dir, -straight.dot(dir));
+    const natural = ELBOW_POLE.clone().transformDirection(this.root.matrixWorld);
+    natural.addScaledVector(dir, -natural.dot(dir)).normalize();
+    const side = toStraight.lengthSq() > 1e-8 ? toStraight.normalize().multiplyScalar(0.8).addScaledVector(natural, 0.2).normalize() : natural;
     const E = S.clone().addScaledVector(dir, a).addScaledVector(side, h);
     this.aim(B.shoulder, B.elbow, E);
     this.aim(B.elbow, B.wrist, W);
+    // the hand's turn about the forearm spread along it, half at the elbow and half in the twist bone, as a
+    // forearm turns — not all in the wrist, which would wring the skin
+    const fore = this.bone(B.twist);
+    fore.updateWorldMatrix(true, false);
+    const qFore = fore.getWorldQuaternion(new THREE.Quaternion());
+    // (the forearm as it would be to carry the hand with the wrist as at rest, in the forearm's own frame)
+    const rel = qFore.clone().invert().multiply(qHand).multiply(this.handInFore.clone().invert());
+    // its twist about the bone (local +y)
+    // (q and −q are the same turn: take the one with w ≥ 0, so the angle is the short way round, within ±180°)
+    const sgn = rel.w < 0 ? -1 : 1;
+    const twist = 2 * Math.atan2(rel.y * sgn, rel.w * sgn);
+    for (const n of [B.elbow, B.twist]) this.bone(n).quaternion.multiply(this.q.setFromAxisAngle(Y_AXIS, twist / 2));
+    // (the hand keeps its place: it is not the forearm's child)
+    this.bone(B.elbow).updateWorldMatrix(false, true);
   }
 
   /** turn bone `n` (in world terms) so that its child `c` lies toward `target` */
@@ -239,6 +266,7 @@ export class Hands {
 }
 
 const X_AXIS = new THREE.Vector3(1, 0, 0);
+const Y_AXIS = new THREE.Vector3(0, 1, 0);
 /** a finger's joints lie this far (m) out from what it closes on: the finger's half-thickness */
 const FINGER = 0.0085;
 const Z_AXIS = new THREE.Vector3(0, 0, 1);

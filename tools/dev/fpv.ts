@@ -77,6 +77,7 @@ if (close) {
   }
   view.lookAt(g);
 }
+{ const gr = (w as unknown as { gripOf(n: string): THREE.Object3D }).gripOf(Q.get('w') ?? 'pistol'); const y = new THREE.Vector3(0, 1, 0).applyQuaternion(gr.quaternion); console.log('gripAxis(piece)', y.toArray().map((v) => v.toFixed(3)).join(','), 'at', gr.position.toArray().map((v) => v.toFixed(3)).join(','), 'angle from up', (Math.acos(y.y) * 57.3).toFixed(1)); }
 { // the wrist: the gap between the end of the forearm and the hand (m)
   const hr = w.hands.root, a = hr.getObjectByName('Bone018_end_041')!.getWorldPosition(new THREE.Vector3()), b = hr.getObjectByName('Bone020_024')!.getWorldPosition(new THREE.Vector3());
   console.log('wristGap', a.distanceTo(b).toFixed(4)); }
