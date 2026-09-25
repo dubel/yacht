@@ -45,6 +45,8 @@ export interface Grasp {
   pinky: [number, number, number];
   thumb: [number, number, number];
   thumbAcross: number;
+  /** …and twisted about its own length (rad at its base): to lay it flat across a broad face */
+  thumbTwist?: number;
   /** radius of the grip (m): the fingers close until they lie on it (see fitted) */
   radius: number;
   /** false: too big to close a fist round (a bottle's body) — the palm laid on its side, `radius` out from the
@@ -177,6 +179,7 @@ export class Hands {
     bend('index', grasp.index, k); bend('middle', grasp.middle, k); bend('ring', grasp.ring, k); bend('pinky', grasp.pinky, k);
     bend('thumb', grasp.thumb, 1);
     this.bone(FINGERS.thumb[0]).quaternion.multiply(this.q.setFromAxisAngle(X_AXIS, grasp.thumbAcross));
+    if (grasp.thumbTwist) this.bone(FINGERS.thumb[0]).quaternion.multiply(this.q.setFromAxisAngle(Y_AXIS, grasp.thumbTwist));
   }
 
   /**

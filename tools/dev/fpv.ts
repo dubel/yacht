@@ -86,6 +86,8 @@ if (close) {
   console.log('wristGap', a.distanceTo(b).toFixed(4)); }
 renderer.render(w.overlay, view);
 (window as unknown as { __w: unknown }).__w = w;
+(window as unknown as { __step: unknown; __GRASP: unknown }).__step = step;
+(window as unknown as { __GRASP: unknown }).__GRASP = GRASP;
 // how many of the hand's vertices lie inside the rum flask's body (in its own frame), and how many touch it
 (window as unknown as { __inside: () => string }).__inside = () => {
   const bottle = (w as unknown as { rum: { group: THREE.Object3D } }).rum.group;

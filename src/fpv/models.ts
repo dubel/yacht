@@ -337,7 +337,9 @@ export async function makeRum(): Promise<RumBottle> {
   // (rounded like the flask's own corners)
   const geo = new RoundedBoxGeometry(W, H, D, 4, 0.07);
   const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.36, 0.1, 0.012), roughness: 0.1, metalness: 0, side: THREE.DoubleSide,
-    emissive: new THREE.Color(0.08, 0.025, 0.003) });
+    emissive: new THREE.Color(0.08, 0.025, 0.003),
+    // (rum is clear: the fingers round the back of the flask show through it, darkened amber)
+    transparent: true, opacity: 0.72, depthWrite: false });
   const uniforms = { uN: { value: new THREE.Vector3(0, 1, 0) }, uC: { value: new THREE.Vector3() }, uH: { value: 0 } };
   mat.onBeforeCompile = (sh) => {
     Object.assign(sh.uniforms, uniforms);
@@ -349,7 +351,6 @@ export async function makeRum(): Promise<RumBottle> {
   const rum = new THREE.Mesh(geo, mat);
   rum.position.copy(toGroup(new THREE.Vector3(0, cy, 0)));
   rum.scale.setScalar(s);
-  rum.renderOrder = -1;
   group.add(rum);
   // held round the body, the index finger up by the shoulder, the palm on its right
   // (the palm on the flask's narrow side, turned a little toward its back: the fingers reach round it)

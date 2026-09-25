@@ -61,8 +61,9 @@ export const GRASP: Record<Exclude<Weapon, 'none'>, Grasp> = {
   lantern: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.005 },
   // the same round the dark lantern's braided cord
   skull: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.007 },
-  // round the flask's body (8 × 7 cm, too big for a fist): the palm on its narrow side, the fingers round its back
-  rum: { index: [0.63, 0.81, 0.54], middle: [0.72, 0.81, 0.54], ring: [0.72, 0.81, 0.54], pinky: [0.63, 0.81, 0.54], thumb: [-0.3, 0.1, 0.1], thumbAcross: 0.1, radius: 0.068, fit: false },
+  // round the flask's body (8 × 7 cm, too big for a fist): the palm on its narrow side, the fingers round its
+  // back, the thumb across its face on the other side
+  rum: { index: [0.63, 0.81, 0.54], middle: [0.72, 0.81, 0.54], ring: [0.72, 0.81, 0.54], pinky: [0.63, 0.81, 0.54], thumb: [0.6, 0.8, 0.56], thumbAcross: 0.8, thumbTwist: -0.8, radius: 0.068, fit: false },
 };
 
 export class Weapons {
