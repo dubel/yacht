@@ -141,6 +141,9 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
   „Spanish Rapier” — Lathander ([Sketchfab](https://sketchfab.com/3d-models/spanish-rapier-ea35c67a680747faade209a8b4d66fc6)),
   „Metal hanging lantern” — Irina.Tuchna ([Sketchfab](https://sketchfab.com/3d-models/metal-hanging-lantern-1bdbe7ea2e5242948f6cd7cccfd7206e)),
   „Skull lantern” — brendan wood ([Sketchfab](https://sketchfab.com/3d-models/skull-lantern-492e96b19abc41aeb28d1114a23684ff)).
+- **Przedmioty (ekwipunek, HUD)**, licencja **CC-BY-4.0**, wersje zoptymalizowane w `public/assets/items/` (`npm run optimize-items`; oryginały w `assets/`):
+  „Pirate Coin (game ready asset)” — Pixel Life ([Sketchfab](https://sketchfab.com/3d-models/pirate-coin-game-ready-asset-7f5bd42a45164a64a20a39a8c37befb5)),
+  „Telescope” — Mathilde Beuvin ([Sketchfab](https://sketchfab.com/3d-models/telescope-b5d0390f357044c086727bd5cb7ab043)).
 - **Clearwater** — © 2026 Lumaris (Aurélien), licencja **MIT** (`third_party/clearwater/LICENSE`).
   Z Clearwatera pochodzą: spektrum i GPU FFT, symulacja ripples, kaustyki z dyspersją, model optyczny wody
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing

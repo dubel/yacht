@@ -11,7 +11,7 @@ renderer.setClearColor(0x7a8a99);
 const scene = new THREE.Scene();
 scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 2.2), new THREE.DirectionalLight(0xffffff, 1.5));
 const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
-const root = (await loader.loadAsync(`/assets/fpv/${Q.get('m')}.glb`)).scene;
+const root = (await loader.loadAsync(`/assets/${Q.get('m')!.includes('/') ? Q.get('m') : 'fpv/' + Q.get('m')}.glb`)).scene;
 scene.add(root);
 root.updateMatrixWorld(true);
 const box = new THREE.Box3().setFromObject(root);

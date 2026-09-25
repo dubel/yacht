@@ -18,6 +18,9 @@ export class Input {
   private ctrlAt = -1e9;
   /** lock the pointer on the next click on the canvas (set by the first-person view) */
   wantLock = false;
+  /** a panel is open (the inventory): the game hears no keys but these */
+  suspended = false;
+  private static readonly THROUGH = new Set(['KeyI', 'Escape', 'Tab', 'F1', 'F7', 'F8', 'F9', 'KeyM']);
   private readonly el: HTMLElement;
 
   constructor(el: HTMLElement) {
@@ -70,10 +73,11 @@ export class Input {
   get locked(): boolean { return document.pointerLockElement === this.el; }
   unlock(): void { if (this.locked) document.exitPointerLock(); }
 
-  isDown(code: string): boolean { return this.down.has(code); }
+  private hears(code: string): boolean { return !this.suspended || Input.THROUGH.has(code); }
+  isDown(code: string): boolean { return this.hears(code) && this.down.has(code); }
   axis(neg: string, pos: string): number { return (this.isDown(pos) ? 1 : 0) - (this.isDown(neg) ? 1 : 0); }
   /** true once per physical key press */
-  wasPressed(code: string): boolean { return this.pressed.has(code); }
+  wasPressed(code: string): boolean { return this.hears(code) && this.pressed.has(code); }
 
   endFrame(): void {
     this.pressed.clear();

@@ -36,6 +36,12 @@ import { Weapons } from '../fpv/Weapons';
 import { Kedge } from '../gameplay/Kedge';
 import { Anchor } from '../gameplay/Anchor';
 import { Landing } from '../gameplay/Landing';
+import { Inventory, ITEMS, SLOTS } from '../gameplay/Inventory';
+import { Hotbar } from '../ui/Hotbar';
+import { ItemIcons } from '../ui/ItemIcons';
+import { InventoryUI } from '../ui/InventoryUI';
+import { Status } from '../ui/Status';
+import type { Weapon } from '../fpv/Weapons';
 import { Leadsman } from '../gameplay/Leadsman';
 import { Music, type Mood } from '../audio/Music';
 import { terrainHeight as landAt } from '../world/WorldGen';
@@ -114,6 +120,18 @@ export class Game {
   anchor!: Anchor;
   readonly leadsman = new Leadsman();
   readonly music = new Music();
+  /** what he owns: slots 1–9, the bag, ducats, health */
+  readonly inventory = new Inventory();
+  readonly hotbar = new Hotbar(this.inventory);
+  /** the things' icons: their models, turning */
+  readonly icons = new ItemIcons((use) => this.weapons.pieceCopy(use as Exclude<Weapon, 'none'>));
+  /** the captain's chest (I) */
+  readonly chest = new InventoryUI(this.inventory, this.icons);
+  /** top right: the ducats and his life */
+  readonly status = new Status(this.inventory);
+  private hotbarDirty = true;
+  private coinDone = false;
+  private iconT = 0;
   private landNear = true;
   private landT = 0;
   private lastWeather = '';
@@ -197,6 +215,16 @@ export class Game {
     this.cam = new SailingCamera(innerWidth / innerHeight);
     this.debug = new DebugUI(this);
     this.hud = new Hud();
+    // the chest open: the game hears no keys but its own, the pointer is free
+    this.chest.onOpen = (open) => {
+      this.input.suspended = open;
+      if (open) this.input.unlock();
+      this.audio.paper();
+    };
+    this.chest.onPick = () => this.audio.tap(false);
+    this.chest.onDrop = () => this.audio.tap(true);
+    this.inventory.onChange(() => { this.hotbarDirty = true; });
+    if (Config.inventory) this.inventory.debug(Config.inventory);
     addEventListener('resize', () => this.resize());
   }
 
@@ -398,16 +426,19 @@ export class Game {
     }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
     if (inp.wasPressed('F7')) this.messages.say(this.music.toggle() ? 'Muzyka włączona (F7)' : 'Muzyka wyłączona (F7)', 2.5);
-    // 1 pistol, 2 rapier, 3 lantern, 7 revolver, 8 dark lantern (again: put it away), 0 the spyglass — on deck (from the chase camera, they take you there)
-    const slot = inp.wasPressed('Digit1') ? 'pistol' : inp.wasPressed('Digit2') ? 'rapier' : inp.wasPressed('Digit3') ? 'lantern' : inp.wasPressed('Digit7') ? 'revolver' : inp.wasPressed('Digit8') ? 'skull' : inp.wasPressed('Digit0') ? 'spyglass' : null;
-    if (slot && !this.map.open) {
+    // 1–9: use what lies in that slot — a weapon or lantern taken out (again: put away), the spyglass raised;
+    // on deck (from the chase camera, it takes you there). What is in which slot is the inventory's (I).
+    let key = -1;
+    for (let i = 0; i < SLOTS; i++) if (inp.wasPressed(`Digit${i + 1}`)) key = i;
+    const use = key >= 0 ? ITEMS[this.inventory.slot(key)?.id ?? '']?.use : undefined;
+    if (use && !this.map.open) {
       if (!this.fpv) this.setOnDeck(true);
       if (this.gunSight.active) this.gunSight.exit();
-      if (slot === 'spyglass') { this.weapons.holster(); this.spyglass.toggle(); }
-      else { this.spyglass.close(); this.weapons.select(slot); }
+      if (use === 'spyglass') { this.weapons.holster(); this.spyglass.toggle(); }
+      else { this.spyglass.close(); this.weapons.select(use); }
     }
-    // L: the spyglass (from the chase camera it first takes you on deck)
-    if (inp.wasPressed('KeyL')) { if (!this.fpv) this.setOnDeck(true); this.spyglass.toggle(); }
+    // L: the spyglass, if he has one (from the chase camera it first takes you on deck)
+    if (inp.wasPressed('KeyL') && this.inventory.has('spyglass')) { if (!this.fpv) this.setOnDeck(true); this.spyglass.toggle(); }
     if (inp.wasPressed('KeyN')) this.weather.cycle();
     if (inp.wasPressed('KeyM')) this.audio.toggleMute();
     if (inp.wasPressed('KeyP')) this.clock.paused = !this.clock.paused;
@@ -416,8 +447,9 @@ export class Game {
     if (inp.wasPressed('Minus') || inp.wasPressed('NumpadSubtract')) this.physics.travel = TRAVEL[Math.max(0, k - 1)];
     if (inp.wasPressed('Equal') || inp.wasPressed('NumpadAdd')) this.physics.travel = TRAVEL[Math.min(TRAVEL.length - 1, k + 1)];
     // the chart needs a visible cursor: release the deck view's mouse lock (the next click takes it back)
-    if (inp.wasPressed('Tab')) { this.map.toggle(); if (this.map.open) this.input.unlock(); }
-    if (inp.wasPressed('Escape')) this.map.close();
+    if (inp.wasPressed('Tab')) { this.chest.close(); this.map.toggle(); if (this.map.open) this.input.unlock(); }
+    if (inp.wasPressed('KeyI')) { this.map.close(); this.chest.toggle(); }
+    if (inp.wasPressed('Escape')) { this.map.close(); this.chest.close(); }
     if (inp.wasPressed('KeyC') && this.map.open) this.map.center();
     // an hour of clock jump moves the clouds by an hour of wind as well: a different sky, not the same one
     const cloudWind = () => ({ x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed });
@@ -541,32 +573,33 @@ export class Game {
         this.gunHint.hidden = true;
         this.weapons.overlay.visible = false;
         this.weapons.hideHud();
+        this.hotbar.show(false);
       } else if (this.ashore) {
         const sg = this.spyglass;
-        sg.update(dt, this.input, !this.map.open);
+        sg.update(dt, this.input, !this.map.open && !this.chest.open && this.inventory.has('spyglass'));
         this.land.scope = sg.raise;
         this.land.magnification = sg.magnification;
         this.land.tremor = sg.tremor();
         this.land.update(dt, this.input, this.cam.camera);
         const L = this.env.light;
-        this.weapons.update(dt, this.input, this.cam.camera, this.land.stride, sg.raise > 0.08 || this.map.open,
+        this.weapons.update(dt, this.input, this.cam.camera, this.land.stride, sg.raise > 0.08 || this.map.open || this.chest.open,
           this.env.lightDir, L.color, L.intensity, this.scene.environment);
-        this.weapons.markSpyglass(sg.raise > 0.3);
+        this.markSlots(sg.raise > 0.3);
         this.nearGun = -1;
         this.guns.highlight(-1, t);
         this.gunHint.hidden = true;
       } else if (this.onDeck) {
         const sg = this.spyglass;
-        sg.update(dt, this.input, !this.map.open);
+        sg.update(dt, this.input, !this.map.open && !this.chest.open && this.inventory.has('spyglass'));
         this.walker.scope = sg.raise;
         this.walker.magnification = sg.magnification;
         this.walker.tremor = sg.tremor();
         this.walker.update(dt, this.input, this.boat.root, this.cam.camera);
         // what is in hand: follows the view, fires / cuts on Ctrl
         const L = this.env.light;
-        this.weapons.update(dt, this.input, this.cam.camera, this.walker.stride, sg.raise > 0.08 || this.map.open,
+        this.weapons.update(dt, this.input, this.cam.camera, this.walker.stride, sg.raise > 0.08 || this.map.open || this.chest.open,
           this.env.lightDir, L.color, L.intensity, this.scene.environment);
-        this.weapons.markSpyglass(sg.raise > 0.3);
+        this.markSlots(sg.raise > 0.3);
         // walking past a gun (empty-handed): it lights up, Ctrl mans it
         this.nearGun = sg.raise < 0.1 && !this.weapons.drawn ? this.guns.near(this.walker.pos.x, this.walker.pos.y) : -1;
         this.guns.highlight(this.nearGun, t);
@@ -578,6 +611,7 @@ export class Game {
         this.gunHint.hidden = true;
         this.weapons.overlay.visible = false;
         this.weapons.hideHud();
+        this.hotbar.show(false);
       }
     }
     this.cam.camera.updateMatrixWorld();
@@ -624,6 +658,9 @@ export class Game {
     });
 
     this.music.update(dt, this.musicMood(dt), this.audio.started, this.audio.muted);
+    this.chest.update(dt);
+    this.status.update(dt, this.ashore ? 0 : body.heel, this.onDeck ? this.walker.pace : this.ashore ? this.land.pace : 0);
+    this.paintIcons(dt);
     this.hud.update(this);
     this.debug.update(dt);
     this.adaptQuality(dt);
@@ -728,6 +765,42 @@ export class Game {
     this.input.wantLock = on;
     if (on) this.walker.spawn(this.boat.info.hullStern);
     else { this.input.unlock(); this.gunSight.exit(); this.weapons.stow(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+  }
+
+  /**
+   * Icons outside the chest: the slots bar's (drawn again when the slots change) and the purse's turning coin
+   * (drawn once). A model not loaded yet is tried again a little later.
+   */
+  private paintIcons(dt: number): void {
+    this.iconT -= dt;
+    if (this.iconT > 0 || (!this.hotbarDirty && this.coinDone)) return;
+    this.iconT = 0.3;
+    if (!this.coinDone) {
+      const strip = this.icons.strip('items/coin', 64, 36);
+      if (strip) { this.status.setCoin(strip, 36); this.coinDone = true; }
+    }
+    if (this.hotbarDirty) {
+      let all = true;
+      this.hotbar.icons.forEach((c, i) => {
+        const s = this.inventory.slot(i);
+        if (!s) { c.getContext('2d')!.clearRect(0, 0, c.width, c.height); return; }
+        if (!this.icons.draw(s.id, c, 0.55)) all = false;
+      });
+      this.hotbarDirty = !all;
+    }
+  }
+
+  /**
+   * The slots bar in first person: shown, the slot of what is in hand (or of the raised spyglass) lit; what
+   * has left the slots (moved to the bag) is put away.
+   */
+  private markSlots(scoped: boolean): void {
+    const w = this.weapons.weapon;
+    if (w !== 'none' && !this.inventory.slots.some((s) => s && ITEMS[s.id].use === w)) this.weapons.holster();
+    if (!this.inventory.has('spyglass')) this.spyglass.close();
+    const on = scoped ? 'spyglass' : w;
+    this.hotbar.setActive(this.inventory.slots.findIndex((s) => s && ITEMS[s.id].use === on));
+    this.hotbar.show(true);
   }
 
   /** rowed ashore: first person on the island; the ship is left to the crew (no helm from the beach) */

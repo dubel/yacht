@@ -340,6 +340,38 @@ export class AudioSystem {
     this.play(name, 0.35 * near, { pan: pan * 0.8, rate: 1.3 + Math.random() * 0.3, lowpass: 1500 + 6000 * near });
   }
 
+  /** the inventory: a thing picked up (a light knock) or put down (a firmer one), the parchment unrolled */
+  tap(firm: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.003;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.start(t, Math.random() * 2, 0.08);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = firm ? 520 : 900; bp.Q.value = 4;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(firm ? 0.5 : 0.3, t); g.gain.setTargetAtTime(0, t + 0.004, firm ? 0.03 : 0.018);
+    src.connect(bp).connect(g).connect(this.muffle);
+  }
+
+  paper(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.003, dur = 0.32;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    src.start(t, Math.random() * 2, dur + 0.05);
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass'; hp.frequency.value = 2200;
+    // crackle: the sheet's fibres, in bursts
+    const chop = ctx.createGain();
+    for (let k = 0; k * 0.012 < dur; k++) chop.gain.setValueAtTime(Math.random() < 0.5 ? 1 : 0.2, t + k * 0.012);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.16, t + 0.05); g.gain.linearRampToValueAtTime(0, t + dur);
+    src.connect(chop).connect(hp).connect(g).connect(this.muffle);
+  }
+
   /** the kedge anchor let go */
   anchorDrop(pan: number, distance: number): void {
     const near = Math.min(1, 25 / (distance + 6));

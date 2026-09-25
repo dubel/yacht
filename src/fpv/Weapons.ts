@@ -105,7 +105,6 @@ export class Weapons {
   private bobPhase = 0;
   private bob = 0;
   private readonly dot = document.createElement('div');
-  private readonly slots = document.createElement('div');
 
   constructor() {
     this.root.add(this.hands.root);
@@ -143,10 +142,7 @@ export class Weapons {
 
     this.dot.id = 'aimdot';
     this.dot.hidden = true;
-    this.slots.id = 'slots';
-    this.slots.hidden = true;
-    this.slots.innerHTML = '<span data-w="pistol"><kbd>1</kbd> pistolet</span><span data-w="rapier"><kbd>2</kbd> rapier</span><span data-w="lantern"><kbd>3</kbd> latarnia</span><span data-w="revolver"><kbd>7</kbd> rewolwer</span><span data-w="skull"><kbd>8</kbd> mroczna latarnia</span><span data-w="spyglass"><kbd>0</kbd> luneta</span>';
-    document.body.append(this.dot, this.slots);
+    document.body.append(this.dot);
   }
 
   /** the pieces and the arm that holds them */
@@ -158,6 +154,18 @@ export class Weapons {
     this.lamps = { lantern, skull };
     for (const w of PIECES) { const g = this.groupOf(w); g.visible = false; this.root.add(g); }
     this.ready = true;
+  }
+
+  /** a copy of a piece's model as it lies in the hand's frame (for its icon); null before they have loaded */
+  pieceCopy(w: Exclude<Weapon, 'none'>): THREE.Object3D | null {
+    if (!this.ready) return null;
+    const g = this.groupOf(w).clone(true);
+    g.position.set(0, 0, 0);
+    g.quaternion.identity();
+    g.visible = true;
+    // (not the muzzle flash, nor the hand's light, should they be hanging on it now)
+    g.traverse((o) => { if ((o as THREE.Sprite).isSprite || (o as THREE.Light).isLight) o.visible = false; });
+    return g;
   }
 
   private groupOf(w: Exclude<Weapon, 'none'>): THREE.Group {
@@ -185,7 +193,7 @@ export class Weapons {
     this.slashT = -1;
     if (this.ready) for (const w of PIECES) this.groupOf(w).visible = false;
     this.worldLight.intensity = this.handLight.intensity = 0;
-    this.dot.hidden = this.slots.hidden = true;
+    this.dot.hidden = true;
   }
 
   /**
@@ -323,24 +331,17 @@ export class Weapons {
     this.updateTrail(dt);
     this.updateLight();
 
-    // ---- HUD: the aiming dot (amber while loading), the slots ----
+    // ---- HUD: the aiming dot (amber while loading) ----
     this.dot.hidden = !(held && this.draw > 0.9);
     this.dot.classList.toggle('loading', !!held && held.hammerTo < 1);
-    this.slots.hidden = false;
-    for (const el of this.slots.children) (el as HTMLElement).classList.toggle('on', (el as HTMLElement).dataset.w === this.weapon);
   }
 
   private gripOf(w: Exclude<Weapon, 'none'>): THREE.Object3D {
     return isGun(w) ? this.guns[w].model.grip : w === 'rapier' ? this.rapier.grip : this.lamps[w].grip;
   }
 
-  /** the slots bar also shows the spyglass slot as active */
-  markSpyglass(on: boolean): void {
-    (this.slots.lastElementChild as HTMLElement).classList.toggle('on', on);
-  }
-
   hideHud(): void {
-    this.dot.hidden = this.slots.hidden = true;
+    this.dot.hidden = true;
   }
 
   /**
