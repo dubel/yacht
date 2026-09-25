@@ -20,7 +20,7 @@ export class Input {
   wantLock = false;
   /** a panel is open (the inventory): the game hears no keys but these */
   suspended = false;
-  private static readonly THROUGH = new Set(['KeyI', 'Escape', 'Tab', 'F1', 'F7', 'F8', 'F9', 'KeyM']);
+  private static readonly THROUGH = new Set(['KeyI', 'Escape', 'Tab', 'F1', 'F7', 'F8', 'F9', 'F10', 'KeyM']);
   private readonly el: HTMLElement;
 
   constructor(el: HTMLElement) {

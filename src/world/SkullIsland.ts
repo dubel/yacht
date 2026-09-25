@@ -23,7 +23,8 @@ import { SKULL_ISLAND, terrainHeight } from './WorldGen';
  */
 
 const FLOOR = SKULL_ISLAND.flat!.h;
-const C = new THREE.Vector2(SKULL_ISLAND.x, SKULL_ISLAND.z);
+/** the island's middle (set when the island is built: where it lies depends on the world seed) */
+const C = new THREE.Vector2();
 /** the passage's centre line (m, from the island's middle): outside the mouth → the mouth → … → the chamber's end */
 const PATH: [number, number][] = [[42, 3], [21, 0], [13, -4], [5, -1], [-3, 5], [-11, 3], [-16, -3], [-22, -6], [-29, -7]];
 /** along the path (m from its start): the mouth, where the chamber opens, its end */
@@ -125,6 +126,7 @@ export class SkullIsland {
 
   constructor(private readonly hooks: SkullHooks) {
     this.group.name = 'skull island';
+    C.set(SKULL_ISLAND.x, SKULL_ISLAND.z);
     // the path, sampled every half metre along its length
     const curve = new THREE.CatmullRomCurve3(PATH.map(([x, z]) => new THREE.Vector3(C.x + x, FLOOR, C.y + z)), false, 'centripetal');
     const len = curve.getLength(), N = Math.ceil(len / 0.5);

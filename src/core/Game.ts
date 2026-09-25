@@ -462,6 +462,7 @@ export class Game {
       }
     }
     if (inp.wasPressed('F9')) this.setFauna(!this.fauna);
+    if (inp.wasPressed('F10')) this.messages.say(this.hud.toggleInstruments() ? 'Przyrządy statku widoczne (F10)' : 'Przyrządy statku schowane (F10)', 2.5);
     if (inp.wasPressed('F7')) this.messages.say(this.music.toggle() ? 'Muzyka włączona (F7)' : 'Muzyka wyłączona (F7)', 2.5);
     // 1–9: use what lies in that slot — a weapon or lantern taken out (again: put away), the spyglass raised;
     // on deck (from the chase camera, it takes you there). What is in which slot is the inventory's (I).
@@ -849,7 +850,10 @@ export class Game {
   /** ?location=skull: the ship at anchor off the Skull Island, the sailor ashore before the cave's mouth */
   private startAtSkull(): void {
     const body = this.physics;
-    body.reset(new THREE.Vector3(SKULL_ISLAND.x + 215, 0, SKULL_ISLAND.z + 10), THREE.MathUtils.degToRad(270), 0);
+    // off the island's side that faces home, ~65 m out from its beach, bow toward it
+    const a = Math.atan2(-SKULL_ISLAND.z, -SKULL_ISLAND.x);
+    const x = SKULL_ISLAND.x + Math.cos(a) * 215, z = SKULL_ISLAND.z + Math.sin(a) * 215;
+    body.reset(new THREE.Vector3(x, 0, z), Math.PI - Math.atan2(SKULL_ISLAND.x - x, SKULL_ISLAND.z - z), 0);
     body.setSails(false);
     body.sailsUp = 0;
     body.applyVisuals(this.boat, 0);

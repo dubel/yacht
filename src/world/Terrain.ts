@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { patchUnderwater } from '../render/water/underwaterLight';
-import { boxIsOpenOcean, terrainHeight } from './WorldGen';
+import { boxIsOpenOcean, setWorldSeed, terrainHeight } from './WorldGen';
 import { tileIndex } from './tileGrid';
 import type { TileRequest, TileResult } from './terrain.worker';
 import type { Vegetation } from './Vegetation';
@@ -73,6 +73,8 @@ export class Terrain {
   private readonly plants = new THREE.Group();
 
   constructor(pebbles: THREE.Texture, seed: number, private readonly vegetation: Vegetation) {
+    // (this thread's queries — physics, the chart, the names — must see the same world as the workers build)
+    setWorldSeed(seed);
     this.pebbles = { value: pebbles };
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
     this.material.onBeforeCompile = (sh) => this.patchShader(sh);

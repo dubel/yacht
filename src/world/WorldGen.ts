@@ -174,11 +174,18 @@ let SEED = 1337;
 const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME), name: 'Laguna Karmazynowa' };
 
 /**
- * The Skull Island: hand-made like the home lagoon (the same in every world), a couple of minutes' sail west
- * of its west pass. A wooded hill with a level plateau in the middle, where the rocks and the cave stand
- * (SkullIsland builds them).
+ * The Skull Island: hand-made (a wooded hill with a level plateau in the middle, where the rocks and the cave
+ * stand — SkullIsland builds them), but where it lies is the world's: somewhere round the home lagoon, in
+ * any direction, 900–1550 m from its middle — some 4–8 minutes' sail from the start to its beach (at ~3 m/s).
+ * Set with the world seed (placeSkull); read its x, z only after that.
  */
 export const SKULL_ISLAND: Island = { x: -1050, z: 60, radius: 150, peak: 14, rock: 0.3, flat: { r: 62, h: 4 } };
+function placeSkull(): void {
+  const rnd = mulberry32(Math.imul(SEED, 0x9e3779b1) ^ 0x5c011);
+  const a = rnd() * Math.PI * 2, d = 900 + rnd() * 650;
+  SKULL_ISLAND.x = Math.round(Math.cos(a) * d);
+  SKULL_ISLAND.z = Math.round(Math.sin(a) * d);
+}
 const SKULL_FEATURE: Feature = { kind: 'island', isl: SKULL_ISLAND, reach: islandReach(SKULL_ISLAND), name: 'Wyspa Czaszek' };
 const cellCache = new Map<number, Feature[]>();
 
@@ -186,6 +193,7 @@ const cellCache = new Map<number, Feature[]>();
 export function setWorldSeed(seed: number): void {
   SEED = seed | 0;
   cellCache.clear();
+  placeSkull();
 }
 
 const cellKey = (i: number, j: number) => (i + 32768) * 65536 + (j + 32768);
@@ -377,3 +385,6 @@ function terrainColorBase(x: number, z: number, h: number, ny: number, out: numb
   const k = 0.8 + 0.4 * n1;
   mix3(out, [ROCK[0] * k, ROCK[1] * k, ROCK[2] * k], steep);
 }
+
+// (the default world, until a seed is set)
+placeSkull();

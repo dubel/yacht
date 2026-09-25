@@ -5,11 +5,12 @@ export class Hud {
   private readonly el = document.getElementById('hud')!;
   private readonly help = document.getElementById('help')!;
   private tick = 0;
+  /** the ship's instruments (F10), remembered between sessions; ashore they are put away of themselves */
+  private instrumentsOn = (() => { try { return localStorage.getItem('lagoon.instruments') !== 'off'; } catch { return true; } })();
   /** the controls panel (F8), remembered between sessions */
   private helpOn = (() => { try { return localStorage.getItem('lagoon.help') !== 'off'; } catch { return true; } })();
 
   constructor() {
-    this.el.hidden = false;
     this.help.hidden = !this.helpOn;
     this.help.innerHTML = [
       '<b>Sterowanie</b> <span class="tog">(<kbd>F8</kbd> — pokaż / ukryj)</span>',
@@ -24,10 +25,17 @@ export class Hud {
       'na mieliźnie: <kbd>K</kbd> — wywieźć kotwicę i ściągnąć statek (kedżowanie)',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
-      '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F6</kbd> widoki wody &nbsp; <kbd>F7</kbd> muzyka wł./wył. &nbsp; <kbd>F9</kbd> fauna wł./wył.',
+      '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F6</kbd> widoki wody &nbsp; <kbd>F7</kbd> muzyka wł./wył. &nbsp; <kbd>F9</kbd> fauna wł./wył. &nbsp; <kbd>F10</kbd> przyrządy statku',
       '<span class="credit">muzyka: Kevin MacLeod (incompetech.com), CC BY 3.0</span>',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',
     ].join('<br>');
+  }
+
+  /** F10: the instruments on / off; returns whether they are now on */
+  toggleInstruments(): boolean {
+    this.instrumentsOn = !this.instrumentsOn;
+    try { localStorage.setItem('lagoon.instruments', this.instrumentsOn ? 'on' : 'off'); } catch { /* storage unavailable */ }
+    return this.instrumentsOn;
   }
 
   toggleHelp(): void {
@@ -37,7 +45,9 @@ export class Hud {
   }
 
   update(g: Game): void {
-    if (this.tick++ % 6) return;
+    // (ashore the ship's instruments are no use: away, and back when he is aboard again)
+    this.el.hidden = !this.instrumentsOn || g.ashore;
+    if (this.el.hidden || this.tick++ % 6) return;
     const p = g.physics;
     const deg = (r: number) => (r * 180) / Math.PI;
     // wind rose: boat points up, arrow shows where the true wind comes FROM
