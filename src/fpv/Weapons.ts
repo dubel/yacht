@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import type { Input } from '../core/Input';
-import { makeFlintlock, makeLantern, makePistol, makeRapier, makeSkullLantern, type Lantern, type Pistol, type Rapier } from './models';
+import { makeFlintlock, makeLantern, makePistol, makeRapier, makeRum, makeSkullLantern, type Lantern, type Pistol, type Rapier, type RumBottle } from './models';
 import { Hands, type Grasp } from './Hands';
 
 /*
@@ -20,10 +20,10 @@ import { Hands, type Grasp } from './Hands';
  * it) and the hand that holds it; Ctrl held lifts it higher and forward, to light further.
  */
 
-export type Weapon = 'none' | 'pistol' | 'revolver' | 'rapier' | 'lantern' | 'skull';
+export type Weapon = 'none' | 'pistol' | 'revolver' | 'rapier' | 'lantern' | 'skull' | 'rum';
 type Gun = 'pistol' | 'revolver';
 const isGun = (w: Weapon): w is Gun => w === 'pistol' || w === 'revolver';
-const PIECES = ['pistol', 'revolver', 'rapier', 'lantern', 'skull'] as const;
+const PIECES = ['pistol', 'revolver', 'rapier', 'lantern', 'skull', 'rum'] as const;
 type Lamp = 'lantern' | 'skull';
 const isLamp = (w: Weapon): w is Lamp => w === 'lantern' || w === 'skull';
 
@@ -38,6 +38,12 @@ const PISTOL_REST = pose(0.16, -0.105, -0.42, 0.04, 0.08, 0);
 const RAPIER_GUARD = pose(0.19, -0.16, -0.42, 0.32, 0.22, -0.35);
 const LANTERN_HOLD = pose(0.2, 0.05, -0.47, 0.05, -0.25, 0);
 const LANTERN_UP = pose(0.1, 0.12, -0.56, 0.2, -0.1, 0);
+// the rum: held upright by the body, its mouth (the pose's point) a little below the eye; drinking, the mouth
+// at the lips and the bottle tipped up over them
+const RUM_HOLD = pose(0.2, 0.04, -0.48, 0.08, -0.25, 0.06);
+const RUM_DRINK = pose(0.05, -0.1, -0.13, 2.0, 0.12, -0.18);
+/** a swig: raising it (s) and how long it takes all told; the swigs in a bottle */
+const SWIG_TIME = 2.6, SWIGS = 8;
 // the two cuts: start (high, to one side, blade raised) → end (low, across the other side)
 const CUTS: [Pose, Pose][] = [
   [pose(-0.06, 0.06, -0.34, 1.25, 0.75, -0.9), pose(0.3, -0.26, -0.42, -0.55, -0.85, -0.9)],
@@ -55,6 +61,8 @@ export const GRASP: Record<Exclude<Weapon, 'none'>, Grasp> = {
   lantern: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.005 },
   // the same round the dark lantern's braided cord
   skull: { index: [1.1, 1.3, 0.9], middle: [1.15, 1.3, 0.9], ring: [1.15, 1.3, 0.9], pinky: [1.1, 1.3, 0.9], thumb: [-0.6, 0.4, 0.3], thumbAcross: 0.3, radius: 0.007 },
+  // round the flask's body: a wide hand, the thumb across its near face
+  rum: { index: [0.6, 0.7, 0.5], middle: [0.65, 0.7, 0.5], ring: [0.65, 0.7, 0.5], pinky: [0.6, 0.7, 0.5], thumb: [-0.3, 0.2, 0.2], thumbAcross: 0.1, radius: 0.04 },
 };
 
 export class Weapons {
@@ -83,6 +91,22 @@ export class Weapons {
   private firing: Gun = 'pistol';
   private rapier!: Rapier;
   private lamps!: Record<Lamp, Lantern>;
+  private rum!: RumBottle;
+  /** the rum left in the bottle (0–1), a swig under way (0–1, −1 none), the surface's sloshing up (world) */
+  rumLeft = 1;
+  private swig = -1;
+  /** debugging: the swig held at this point */
+  debugSwig: number | null = null;
+  private readonly slosh = new THREE.Vector3(0, 1, 0);
+  private readonly sloshV = new THREE.Vector3();
+  private readonly lastPos = new THREE.Vector3();
+  private readonly lastVel = new THREE.Vector3();
+  /** the rum: a swig begun (sound), a gulp in it, the swig down (he is the drunker for it); the bottle is empty
+   *  (true if it is filled again) */
+  onSwig: (() => void) | null = null;
+  onGulp: (() => void) | null = null;
+  onDrunk: (() => void) | null = null;
+  onEmpty: (() => boolean) | null = null;
   /** the lantern's light in the world (in the main scene from the start, dark until a lantern is held) */
   readonly worldLight = new THREE.PointLight(0xffa850, 0, 38, 2);
   private readonly handLight = new THREE.PointLight(0xffa850, 0, 1.5, 2);
@@ -149,7 +173,8 @@ export class Weapons {
 
   /** the pieces and the arm that holds them */
   async load(): Promise<void> {
-    const [pistol, revolver, rapier, lantern, skull] = await Promise.all([makeFlintlock(), makePistol(), makeRapier(), makeLantern(), makeSkullLantern(), this.hands.load('assets/fpv/hands.glb')]);
+    const [pistol, revolver, rapier, lantern, skull, rum] = await Promise.all([makeFlintlock(), makePistol(), makeRapier(), makeLantern(), makeSkullLantern(), makeRum(), this.hands.load('assets/fpv/hands.glb')]);
+    this.rum = rum;
     const gun = (model: Pistol) => { model.setHammer(1); return { model, rounds: model.chambers, hammer: 1, hammerTo: 1, cylinder: 0, cylinderTo: 0, cycle: 0, reload: 0 }; };
     this.guns = { pistol: gun(pistol), revolver: gun(revolver) };
     this.rapier = rapier;
@@ -171,7 +196,7 @@ export class Weapons {
   }
 
   private groupOf(w: Exclude<Weapon, 'none'>): THREE.Group {
-    return isGun(w) ? this.guns[w].model.group : w === 'rapier' ? this.rapier.group : this.lamps[w].group;
+    return isGun(w) ? this.guns[w].model.group : w === 'rapier' ? this.rapier.group : w === 'rum' ? this.rum.group : this.lamps[w].group;
   }
 
   /** anything in hand (Ctrl then belongs to it, not to manning a gun) */
@@ -264,6 +289,22 @@ export class Weapons {
     if (this.kick < 0.75) { this.flash.visible = false; this.flashLight.intensity = 0; }
     this.kick = Math.max(0, this.kick - dt * 3.2);
 
+    // the rum: a swig — or, the bottle empty, perhaps it is filled
+    if (this.held === 'rum' && pull && this.swig < 0) {
+      if (this.rumLeft > 0.01) { this.swig = 0; this.onSwig?.(); }
+      else if (this.onEmpty?.()) this.rumLeft = 1;
+    }
+    if (this.swig >= 0) {
+      const was = this.swig;
+      this.swig += dt / SWIG_TIME;
+      // down the throat through the middle of it, a gulp at a time
+      if (this.swig > 0.3 && this.swig < 0.78) this.rumLeft = Math.max(0, this.rumLeft - dt / SWIG_TIME / 0.48 / SWIGS);
+      for (const at of [0.42, 0.56, 0.7]) if (was < at && this.swig >= at) this.onGulp?.();
+      if (was < 0.8 && this.swig >= 0.8) this.onDrunk?.();
+      if (this.swig >= 1) this.swig = -1;
+      if (this.held !== 'rum') this.swig = -1;
+      if (this.debugSwig !== null) this.swig = this.debugSwig;
+    }
     if (this.held === 'rapier' && pull && (this.slashT < 0 || this.slashT > 0.7)) {
       this.slashT = 0;
       this.cut = 1 - this.cut;
@@ -304,6 +345,14 @@ export class Weapons {
       p.lerpVectors(LANTERN_HOLD.p, LANTERN_UP.p, k);
       q.slerpQuaternions(new THREE.Quaternion().setFromEuler(LANTERN_HOLD.r), new THREE.Quaternion().setFromEuler(LANTERN_UP.r), k);
       this.swingLantern(dt);
+    } else if (this.held === 'rum') {
+      // a swig: up to the lips, tipped over them while it goes down, and back
+      const w = this.swig < 0 ? 0 : this.swig < 0.25 ? this.swig / 0.25 : this.swig < 0.8 ? 1 : 1 - (this.swig - 0.8) / 0.2;
+      const k = w * w * (3 - 2 * w);
+      p.lerpVectors(RUM_HOLD.p, RUM_DRINK.p, k);
+      q.slerpQuaternions(new THREE.Quaternion().setFromEuler(RUM_HOLD.r), new THREE.Quaternion().setFromEuler(RUM_DRINK.r), k);
+      // (the cork out while he drinks)
+      this.rum.cork.visible = this.swig < 0.12 || this.swig > 0.95;
     }
     // drawing / putting away: from below the frame
     const d = 1 - this.draw;
@@ -323,6 +372,7 @@ export class Weapons {
     // the hand on the grip of what is held, the arm after it
     this.root.updateMatrixWorld(true);
     this.hands.update(this.held === 'none' ? null : this.gripOf(this.held), this.held === 'none' ? null : GRASP[this.held]);
+    if (this.held === 'rum') this.sloshRum(dt);
     this.light.position.copy(camera.position).add(sunDir);
     this.light.target.position.copy(camera.position);
     this.light.color.copy(sunColor);
@@ -341,7 +391,7 @@ export class Weapons {
   }
 
   private gripOf(w: Exclude<Weapon, 'none'>): THREE.Object3D {
-    return isGun(w) ? this.guns[w].model.grip : w === 'rapier' ? this.rapier.grip : this.lamps[w].grip;
+    return isGun(w) ? this.guns[w].model.grip : w === 'rapier' ? this.rapier.grip : w === 'rum' ? this.rum.grip : this.lamps[w].grip;
   }
 
   hideHud(): void {
@@ -360,6 +410,24 @@ export class Weapons {
     this.swing.addScaledVector(this.swingV, dt);
     this.swing.clampScalar(-0.6, 0.6);
     for (const l of Object.values(this.lamps)) l.body.rotation.set(this.swing.y, 0, this.swing.x);
+  }
+
+  /**
+   * The rum's surface: level in the world, but with a lag — a damped spring pulled from the true up by the
+   * bottle's own acceleration (a jolt throws the rum the other way), so it sways, overshoots and settles.
+   */
+  private sloshRum(dt: number): void {
+    const pos = this.rum.group.getWorldPosition(new THREE.Vector3());
+    const vel = pos.clone().sub(this.lastPos).divideScalar(Math.max(dt, 1e-3));
+    const acc = vel.clone().sub(this.lastVel).divideScalar(Math.max(dt, 1e-3)).clampLength(0, 25);
+    if (this.lastPos.lengthSq() === 0 || dt > 0.1) acc.set(0, 0, 0);
+    this.lastPos.copy(pos);
+    this.lastVel.copy(vel);
+    // where the surface would lie in a steady push: square to gravity less the acceleration
+    const target = new THREE.Vector3(0, 9.81, 0).sub(acc.multiplyScalar(0.6)).normalize();
+    this.sloshV.addScaledVector(target.sub(this.slosh), 70 * dt).multiplyScalar(Math.exp(-dt * 4.5));
+    this.slosh.addScaledVector(this.sloshV, dt).normalize();
+    this.rum.setLiquid(this.rumLeft, this.slosh);
   }
 
   /** the flame flickers; its light follows it in the world, in its own colour and reach, and warms the hand */

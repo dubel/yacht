@@ -37,6 +37,8 @@ export class LandWalker {
   scope = 0;
   magnification = 1;
   tremor = { yaw: 0, pitch: 0 };
+  /** the head swimming (rum): offsets to the look, and a roll (rad), set each frame */
+  sway = { yaw: 0, pitch: 0, roll: 0 };
   onStep: ((pace: number, ground: Ground, wade: number) => void) | null = null;
   onLand: ((height: number) => void) | null = null;
   onJump: (() => void) | null = null;
@@ -156,7 +158,7 @@ export class LandWalker {
     // ---- the eye ----
     camera.position.set(this.pos.x + bobX * c, this.footY + EYE - bobY, this.pos.y - bobX * s);
     // camera looks down −z: turn it to face +z at yaw 0
-    this.euler.set(this.pitch + this.tremor.pitch, this.yaw + this.tremor.yaw + Math.PI, 0, 'YXZ');
+    this.euler.set(this.pitch + this.tremor.pitch + this.sway.pitch, this.yaw + this.tremor.yaw + this.sway.yaw + Math.PI, this.sway.roll, 'YXZ');
     camera.quaternion.setFromEuler(this.euler);
     camera.updateMatrixWorld();
   }

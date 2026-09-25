@@ -38,6 +38,7 @@ export interface ThunderEvent {
 const LOOPS = ['ocean', 'lapping', 'rain-light', 'rain-heavy', 'crickets', 'creak-loop'] as const;
 const SHOTS = ['thunder-1', 'thunder-2', 'thunder-3', 'thunder-4', 'thunder-5', 'gull-1', 'gull-2', 'gull-3', 'creak-1',
   'splash-big', 'splash-1', 'splash-2', 'splash-3',
+  'gulp-1', 'gulp-2', 'swig',
   'skel-roar-1', 'skel-roar-2', 'skel-roar-3', 'skel-rasp-1', 'skel-rasp-2', 'skel-rasp-3', 'skel-rasp-5', 'skel-grunt-1', 'skel-grunt-2', 'skel-grunt-3'] as const;
 /** a skeleton's voices (recorded: monster growls and a zombie's moan — see public/assets/audio/CREDITS.md) */
 const SKEL: Record<'roar' | 'rasp' | 'grunt', ShotName[]> = {
@@ -474,6 +475,39 @@ export class AudioSystem {
       dl.connect(wet).connect(this.muffle);
     }
     src.start(t);
+  }
+
+  /** the rum: the bottle tipped up (the gurgle of it running into his mouth), a gulp, and — well gone — a hiccup */
+  swig(): void {
+    this.play('swig', 0.55, { rate: 0.9 + Math.random() * 0.1, lowpass: 5000 });
+  }
+
+  gulp(): void {
+    const name = Math.random() < 0.6 ? 'gulp-1' : 'gulp-2';
+    this.play(name, 0.75, { rate: 0.85 + Math.random() * 0.2 });
+  }
+
+  hiccup(): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    // a clipped, glottal "hic": a burst of voice that jumps up in pitch and stops dead
+    const t = ctx.currentTime + 0.01, len = 0.13;
+    const o = ctx.createOscillator();
+    o.type = 'sawtooth';
+    o.frequency.setValueAtTime(140, t); o.frequency.exponentialRampToValueAtTime(320, t + len);
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise; src.start(t, Math.random(), len + 0.05);
+    const mix = ctx.createGain();
+    const ng = ctx.createGain(); ng.gain.value = 0.35;
+    o.connect(mix); src.connect(ng).connect(mix);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(0.35, t + 0.012); g.gain.setValueAtTime(0.3, t + len - 0.03); g.gain.linearRampToValueAtTime(0, t + len);
+    for (const [f, q] of [[700, 5], [1200, 6]] as const) {
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = f; bp.Q.value = q;
+      mix.connect(bp).connect(g);
+    }
+    g.connect(this.muffle);
+    o.start(t); o.stop(t + len + 0.05);
   }
 
   /** the sailor cut: a dull blow, and his breath knocked out */

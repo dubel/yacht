@@ -11,6 +11,8 @@ export class PostProcessor {
   golden = 0;
   /** 0..1 spyglass at the eye: round lens field, edge fringing, black around */
   scope = 0;
+  /** 0 sober … 1 roaring drunk: the picture swims, doubles and warms */
+  drunk = 0;
   /** lens radius as a fraction of the shorter screen side (at full raise) */
   scopeR = 0.44;
   private qA!: THREE.WebGLRenderTarget;
@@ -51,7 +53,7 @@ uniform sampler2D uSrc; uniform float uK;
 void main(){ o = vec4(texture(uSrc,vUv).rgb*uK, 1); }`, { uSrc: { value: null }, uK: { value: 1 } });
 
     this.final = passMaterial(/* glsl */ `
-uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden, uScope, uScopeR, uAspect;
+uniform sampler2D uHdr, uB1, uB2; uniform float uExp, uTime, uGolden, uScope, uScopeR, uAspect, uDrunk;
 vec3 bicubic(sampler2D t, vec2 uv){
   vec2 ts = vec2(textureSize(t,0)); vec2 p = uv*ts - 0.5; vec2 f = fract(p); p = floor(p);
   vec2 w0 = f*(-0.5+f*(1.0-0.5*f)), w1 = 1.0+f*f*(-2.5+1.5*f), w2 = f*(0.5+f*(2.0-1.5*f)), w3 = f*f*(-0.5+0.5*f);
@@ -72,9 +74,21 @@ void main(){
     float k = 0.07*raise;
     uv = 0.5 + (sp*(1.0 - k + k*sr*sr))/vec2(uAspect, 1.0);
   }
-  vec2 cc = uv-0.5; float ca = 0.0012*dot(cc,cc)*4.0 + 0.0045*raise*sr*sr;
+  // drunk: the picture swims — a slow wobble through it, stronger toward the edges
+  if (uDrunk > 0.001) {
+    vec2 e = uv - 0.5;
+    uv += uDrunk*(0.004 + 0.012*dot(e, e))*vec2(sin(uv.y*7.0 + uTime*1.3) + 0.5*sin(uv.y*17.0 - uTime*2.1), cos(uv.x*6.0 + uTime*1.1));
+  }
+  vec2 cc = uv-0.5; float ca = 0.0012*dot(cc,cc)*4.0 + 0.0045*raise*sr*sr + 0.006*uDrunk*uDrunk;
   vec3 c;
   c.r = texture(uHdr, uv + cc*ca).r; c.g = texture(uHdr, uv).g; c.b = texture(uHdr, uv - cc*ca).b;
+  // …and doubles: a second image drifting off and back, the eyes failing to agree
+  if (uDrunk > 0.001) {
+    float pull = 0.55 + 0.45*sin(uTime*0.73);
+    vec2 off = uDrunk*0.022*pull*vec2(cos(uTime*0.41), 0.45*sin(uTime*0.29));
+    vec3 ghost = texture(uHdr, uv + off).rgb;
+    c = mix(c, ghost, 0.45*min(1.0, uDrunk*1.6));
+  }
   float bloom = 0.035 + 0.05*uGolden;
   c += texture(uB1, uv).rgb * bloom + bicubic(uB2, uv) * bloom;
   c *= uExp;
@@ -90,6 +104,9 @@ void main(){
   // old glass: darker toward the rim of the field, and nothing outside it
   c *= mix(1.0, 0.45 + 0.55*smoothstep(1.05, 0.45, sr), raise);
   c *= 1.0 - smoothstep(0.985, 1.0, sr)*smoothstep(0.0, 0.15, uScope);
+  // drunk: the edges of sight close in, the world gone warm and golden
+  c *= 1.0 - uDrunk*0.55*smoothstep(0.1, 0.55, dot(cc, cc)*2.2);
+  c *= mix(vec3(1.0), vec3(1.1, 1.0, 0.82), uDrunk*0.8);
   c = aces(c);
   float lum = dot(c, vec3(0.2126,0.7152,0.0722));
   c = mix(vec3(lum), c, 0.93);
@@ -98,7 +115,7 @@ void main(){
   float g = hash(gl_FragCoord.xy + fract(uTime*7.13)*917.0) - 0.5;
   c += g * 0.014 * (1.0 - c*0.6);
   o = vec4(c, 1);
-}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 },
+}`, { uHdr: { value: null }, uB1: { value: null }, uB2: { value: null }, uExp: { value: 0.63 }, uTime: { value: 0 }, uGolden: { value: 0 }, uDrunk: { value: 0 },
       uScope: { value: 0 }, uScopeR: { value: 0.44 }, uAspect: { value: 1 } });
   }
 
@@ -126,7 +143,7 @@ void main(){
     }
     const f = this.final.uniforms;
     f.uHdr.value = hdr; f.uB1.value = this.b1.texture; f.uB2.value = this.b2.texture;
-    f.uExp.value = this.exposure; f.uTime.value = time; f.uGolden.value = this.golden;
+    f.uExp.value = this.exposure; f.uTime.value = time; f.uGolden.value = this.golden; f.uDrunk.value = this.drunk;
     f.uScope.value = this.scope; f.uScopeR.value = this.scopeR;
     f.uAspect.value = this.qA.width / Math.max(1, this.qA.height);
     blit.run(this.final, null);

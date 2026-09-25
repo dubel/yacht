@@ -117,6 +117,9 @@ export class Game {
   /** game hours on the clock last frame (the island's respawn clock runs on game time) */
   private lastHours = 0;
   private dead = false;
+  /** rum in him: 0 sober … 1 roaring drunk (more still is stored up, and takes longer to wear off) */
+  drunk = 0;
+  private hicT = 10;
   private readonly hurtEl = Object.assign(document.createElement('div'), { id: 'hurt' });
   private revealT = 0;
   readonly spyglass = new Spyglass();
@@ -267,6 +270,15 @@ export class Game {
     this.scene.add(this.musketry.mesh);
     this.weapons.onPan = (hang) => this.audio.pistol(hang);
     this.weapons.onReady = () => this.audio.cock();
+    // the rum: a swig, its gulps, the head swimming the more for each; an empty bottle filled from the ship's cask
+    this.weapons.onSwig = () => this.audio.swig();
+    this.weapons.onGulp = () => this.audio.gulp();
+    this.weapons.onDrunk = () => { this.drunk = Math.min(1.6, this.drunk + 0.17); };
+    this.weapons.onEmpty = () => {
+      if (this.onDeck) { this.messages.say('Napełniasz flaszkę rumem z beczki w ładowni.', 3); return true; }
+      this.messages.say('Pusta flaszka. Napełnisz ją na statku.', 3);
+      return false;
+    };
     this.weapons.onSlash = (cut) => this.audio.swoosh(cut === 0 ? 0.3 : -0.3);
     this.weapons.onPistol = (muzzle, dir) => {
       this.musketry.fire(muzzle, dir, this.ashore ? new THREE.Vector3() : this.physics.velocity);
@@ -601,6 +613,7 @@ export class Game {
     if (this.ashore && this.revealT <= 0) { this.revealT = 1; this.discovery.revealAt(this.land.pos.x, this.land.pos.y, 150); }
     this.map.update(dt, { x: body.origin.x, z: body.origin.z, heading: body.heading }, this.ashore ? { x: this.land.pos.x, z: this.land.pos.y } : null);
 
+    this.updateDrunk(dt, t);
     // --- camera ---
     const focus = body.origin.clone();
     // where the player is (the ship, or him ashore): shadows, the sound of the shore
@@ -821,6 +834,33 @@ export class Game {
     this.input.wantLock = on;
     if (on) this.walker.spawn(this.boat.info.hullStern);
     else { this.input.unlock(); this.gunSight.exit(); this.weapons.stow(); this.spyglass.close(); this.spyglass.raise = 0; this.spyglass.update(0, this.input, false); }
+  }
+
+  /**
+   * Rum: it wears off slowly (a full load in some three minutes). While it lasts the head swims — the view
+   * drifts, nods and rolls in slow, uneven swells — his feet wander off the line he means to walk, the picture
+   * doubles and warms (the post pass), and now and then a hiccup.
+   */
+  private updateDrunk(dt: number, t: number): void {
+    this.drunk = Math.max(0, this.drunk - dt / 180);
+    const d = Math.min(1, this.drunk), w = d * d * (3 - 2 * d);
+    const sway = {
+      yaw: w * (0.05 * Math.sin(t * 0.53) + 0.02 * Math.sin(t * 1.37 + 2)),
+      pitch: w * (0.035 * Math.sin(t * 0.71 + 1) + 0.015 * Math.sin(t * 1.9)),
+      roll: w * (0.1 * Math.sin(t * 0.43) + 0.035 * Math.sin(t * 1.13 + 0.5)),
+    };
+    this.walker.sway = sway;
+    this.land.sway = sway;
+    // the feet go their own way: the heading wanders while he walks
+    const drift = w * 0.35 * (Math.sin(t * 0.31) + 0.6 * Math.sin(t * 0.83 + 1.7)) * dt;
+    if (this.onDeck) this.walker.yaw += drift * Math.min(1, this.walker.pace * 3 + 0.2);
+    else if (this.ashore) this.land.yaw += drift * Math.min(1, this.land.pace * 3 + 0.2);
+    this.pipeline.post.drunk = w;
+    this.hicT -= dt;
+    if (this.hicT <= 0) {
+      this.hicT = 6 + Math.random() * 14;
+      if (d > 0.45 && Math.random() < d) this.audio.hiccup();
+    }
   }
 
   /** cut by a guard: his life runs out of the tube; at nothing, he is dead */

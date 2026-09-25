@@ -139,6 +139,7 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
   „Flintlock Colonial Pistol (2019)” — inciprocal ([Sketchfab](https://sketchfab.com/3d-models/flintlock-colonial-pistol-2019-free-80c06fd527ba43e38ffa899ab2a7d00b)),
   „Revolver” — barmatunishka ([Sketchfab](https://sketchfab.com/3d-models/revolver-68f58d1af9b24486a63dcf29d0fc0cbc)),
   „Spanish Rapier” — Lathander ([Sketchfab](https://sketchfab.com/3d-models/spanish-rapier-ea35c67a680747faade209a8b4d66fc6)),
+  „Bottle of "Brazilian Rum" – J. Haberfeld Factory” — Wirtualne Muzea Małopolski ([Sketchfab](https://sketchfab.com/WirtualneMuzeaMalopolski)),
   „Metal hanging lantern” — Irina.Tuchna ([Sketchfab](https://sketchfab.com/3d-models/metal-hanging-lantern-1bdbe7ea2e5242948f6cd7cccfd7206e)),
   „Skull lantern” — brendan wood ([Sketchfab](https://sketchfab.com/3d-models/skull-lantern-492e96b19abc41aeb28d1114a23684ff)).
 - **Przedmioty (ekwipunek, HUD)**, licencja **CC-BY-4.0**, wersje zoptymalizowane w `public/assets/items/` (`npm run optimize-items`; oryginały w `assets/`):

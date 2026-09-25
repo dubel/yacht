@@ -47,6 +47,8 @@ export class DeckWalker {
   scope = 0;
   magnification = 1;
   tremor = { yaw: 0, pitch: 0 };
+  /** the head swimming (rum): offsets to the look, and a roll (rad), set each frame */
+  sway = { yaw: 0, pitch: 0, roll: 0 };
 
   private readonly vel = new THREE.Vector2();
   private bob = 0;
@@ -182,7 +184,7 @@ export class DeckWalker {
     // bracing against the roll with the glass up: less of the boat's tilt reaches the view
     const qBody = this.qLevel.clone().slerp(qb, LEVEL * (1 - 0.6 * this.scope));
     // camera looks down −z: turn it to face the bow (+z), then yaw / pitch
-    this.euler.set(this.pitch + this.tremor.pitch, this.yaw + this.tremor.yaw + Math.PI, 0, 'YXZ');
+    this.euler.set(this.pitch + this.tremor.pitch + this.sway.pitch, this.yaw + this.tremor.yaw + this.sway.yaw + Math.PI, this.sway.roll, 'YXZ');
     this.qLook.setFromEuler(this.euler);
     camera.quaternion.copy(qBody).multiply(this.qLook);
     camera.updateMatrixWorld();

@@ -34,6 +34,9 @@ if (Q.get('shots')) {
     console.log(`pull ${i + 1}: fired ${fired} rounds ${st.rounds} hammer ${st.hammer.toFixed(2)}→${st.hammerTo} cyl ${(st.cylinder * 180 / Math.PI).toFixed(0)}° reload ${st.reload.toFixed(2)}`);
   }
 }
+// &swig=0..1 &left=0..1: the rum mid-swig, that much left in the bottle
+if (Q.get('left')) { (w as unknown as { rumLeft: number }).rumLeft = +Q.get('left')!; for (let i = 0; i < 30; i++) step(1 / 60); }
+if (Q.get('swig')) { w.debugSwig = +Q.get('swig')!; (w as unknown as { swig: number }).swig = w.debugSwig; for (let i = 0; i < 30; i++) step(1 / 60); }
 if (Q.get('lift')) { pressed.add('hold:ControlLeft'); for (let i = 0; i < 90; i++) step(1 / 60); }
 // &hammer=0..1: the revolver's hammer set there (after the frames above)
 if (Q.get('hammer')) (w as unknown as { guns: Record<string, { model: { setHammer(k: number): void } }> }).guns[Q.get('w') ?? 'pistol'].model.setHammer(+Q.get('hammer')!);

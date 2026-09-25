@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 /*
  * First-person pieces, from models (optimised copies in assets/fpv, npm run optimize-weapons; all CC-BY-4.0,
@@ -299,4 +300,72 @@ export async function makeSkullLantern(): Promise<Lantern> {
   const grip = gripFrame(new THREE.Vector3(0, 0, 0), new THREE.Vector3(-1, 0, 0));
   group.add(grip);
   return { group, body, flame, glow, glowBase: 4, light: { color: new THREE.Color(0x7dff9a), intensity: 16, distance: 20 }, grip };
+}
+
+export interface RumBottle {
+  group: THREE.Group;
+  grip: THREE.Object3D;
+  cork: THREE.Object3D;
+  /** once per frame, after the bottle is posed: the rum's surface follows the sloshing `up` (world, unit) */
+  setLiquid(fill: number, up: THREE.Vector3): void;
+}
+
+/**
+ * A bottle of Brazilian rum from the J. Haberfeld factory ("Bottle of Brazilian Rum", Virtual Museums of
+ * Małopolska, CC-BY-4.0): a squat, square green flask, a paper label, a cork. The group's origin is its
+ * mouth (so a pose puts the mouth where it wants it: at his lips, drinking), the bottle standing on +Y below.
+ *
+ * The rum in it is a box filling the body, cut off above its surface — a plane through the box at the
+ * height that leaves `fill` of it below, square to the `up` it is given (the world's, swinging as the rum
+ * sloshes). Its inside faces, seen through the cut, are drawn lighter: the surface. Tilted, the rum runs to
+ * whatever is lowest — into the neck as he drinks.
+ */
+export async function makeRum(): Promise<RumBottle> {
+  const m = await load('rum');
+  tame(m);
+  // (the glass as scanned is near black: thinner and clearer, the rum showing through)
+  m.traverse((o) => {
+    const mat = (o as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+    if (mat?.transparent && o.parent?.name.includes('Butelka')) { mat.opacity = 0.42; mat.roughness = 0.08; mat.depthWrite = false; mat.envMapIntensity = 1.1; }
+  });
+  const cork = m.getObjectByName('MZ_25_d_korek_edit06_4') ?? new THREE.Object3D();
+  // (model: ~1 unit tall, the mouth at y 0.567; the body x ±0.18, z ±0.15, y −0.43…0.24; ~26 cm tall here)
+  const s = 0.26;
+  const { group, toGroup } = place(m, s, new THREE.Quaternion(), new THREE.Vector3(0, 0.567, 0));
+  // the rum
+  const W = 0.32, H = 0.56, D = 0.26, cy = -0.07;
+  // (rounded like the flask's own corners)
+  const geo = new RoundedBoxGeometry(W, H, D, 4, 0.07);
+  const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color(0.36, 0.1, 0.012), roughness: 0.1, metalness: 0, side: THREE.DoubleSide,
+    emissive: new THREE.Color(0.08, 0.025, 0.003) });
+  const uniforms = { uN: { value: new THREE.Vector3(0, 1, 0) }, uC: { value: new THREE.Vector3() }, uH: { value: 0 } };
+  mat.onBeforeCompile = (sh) => {
+    Object.assign(sh.uniforms, uniforms);
+    sh.vertexShader = 'varying vec3 vRumW;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\n  vRumW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = 'uniform vec3 uN, uC; uniform float uH; varying vec3 vRumW;\n' + sh.fragmentShader
+      .replace('#include <clipping_planes_fragment>', '#include <clipping_planes_fragment>\n  if (dot(vRumW - uC, uN) > uH) discard;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  if (!gl_FrontFacing) totalEmissiveRadiance += vec3(0.2, 0.08, 0.015);');
+  };
+  const rum = new THREE.Mesh(geo, mat);
+  rum.position.copy(toGroup(new THREE.Vector3(0, cy, 0)));
+  rum.scale.setScalar(s);
+  rum.renderOrder = -1;
+  group.add(rum);
+  // held round the body, the index finger up by the shoulder, the palm on its right
+  const grip = gripFrame(toGroup(new THREE.Vector3(0.04, -0.12, 0)), new THREE.Vector3(0, 1, 0), new THREE.Vector3(1, 0, 0));
+  group.add(grip);
+  const q = new THREE.Quaternion(), ax = new THREE.Vector3(), half = [W / 2, H / 2, D / 2].map((v) => v * s);
+  return {
+    group, grip, cork,
+    setLiquid(fill, up) {
+      rum.updateWorldMatrix(true, false);
+      rum.getWorldPosition(uniforms.uC.value);
+      rum.getWorldQuaternion(q);
+      // how far the box reaches along `up` either side of its middle; the surface where `fill` of it lies below
+      let e = 0;
+      for (let k = 0; k < 3; k++) e += half[k] * Math.abs(ax.set(k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0).applyQuaternion(q).dot(up));
+      uniforms.uN.value.copy(up);
+      uniforms.uH.value = -e + 2 * e * Math.min(1, Math.max(0, fill)) - (fill <= 0.001 ? 1 : 0);
+    },
+  };
 }

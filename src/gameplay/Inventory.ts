@@ -8,7 +8,7 @@
  * icon is drawn from (see ItemIcons) and how that model is best turned to be looked at.
  */
 
-export type Use = 'pistol' | 'revolver' | 'rapier' | 'lantern' | 'skull' | 'spyglass';
+export type Use = 'pistol' | 'revolver' | 'rapier' | 'lantern' | 'skull' | 'spyglass' | 'rum';
 
 export interface ItemDef {
   name: string;
@@ -31,6 +31,7 @@ export const ITEMS: Record<string, ItemDef> = {
   lantern: { name: 'Latarnia', desc: 'Żelazna latarnia ze świecą. Ctrl podnosi ją wyżej.', use: 'lantern', model: 'fpv:lantern', zoom: 1.15 },
   revolver: { name: 'Rewolwer', desc: 'Sześć komór i kapiszony — broń z innej epoki, nie wiadomo skąd.', use: 'revolver', model: 'fpv:revolver', pose: [0, 0.35] },
   skull: { name: 'Mroczna latarnia', desc: 'Czaszka na sznurze, świeca w żuchwie i zielony, zimny płomień.', use: 'skull', model: 'fpv:skull', zoom: 1.05 },
+  rum: { name: 'Rum brazylijski', desc: 'Flaszka z fabryki J. Haberfelda. Ctrl — łyk. Każdy łyk kręci w głowie mocniej; pustą napełnisz na statku.', use: 'rum', model: 'fpv:rum', zoom: 1.1 },
   spyglass: { name: 'Luneta', desc: 'Mosiężna luneta. Też prawy przycisk myszy.', use: 'spyglass', model: 'items/telescope', pose: [0, 0.6] },
 };
 
@@ -64,7 +65,7 @@ export class Inventory {
     this.slots.fill(null);
     this.bag.length = 0;
     const put = (i: number, id: string) => { this.slots[i] = { id, n: 1 }; };
-    put(0, 'pistol'); put(1, 'rapier'); put(2, 'lantern'); put(6, 'revolver'); put(7, 'skull'); put(8, 'spyglass');
+    put(0, 'pistol'); put(1, 'rapier'); put(2, 'lantern'); put(5, 'rum'); put(6, 'revolver'); put(7, 'skull'); put(8, 'spyglass');
     this.ducats = 100;
     this.health = 1;
     this.changed();
@@ -194,7 +195,7 @@ export class Inventory {
 
   private save(): void {
     try {
-      localStorage.setItem(KEY, JSON.stringify({ v: VERSION, slots: this.slots, bag: this.bag, ducats: this.ducats, health: this.health }));
+      localStorage.setItem(KEY, JSON.stringify({ v: VERSION, slots: this.slots, bag: this.bag, ducats: this.ducats, health: this.health, kit: ['rum'] }));
     } catch { /* storage unavailable */ }
   }
 
@@ -208,6 +209,8 @@ export class Inventory {
       this.bag.push(...d.bag);
       this.ducats = +d.ducats || 0;
       this.health = Number.isFinite(+d.health) ? +d.health : 1;
+      // (things added to the kit since this was saved: into their slot if it is free, else the bag)
+      for (const [i, id] of [[5, 'rum']] as const) if (!(d.kit ?? []).includes(id) && !this.has(id)) { if (!this.slots[i]) this.slots[i] = { id, n: 1 }; else this.bag.push({ id, n: 1 }); }
       return true;
     } catch {
       return false;

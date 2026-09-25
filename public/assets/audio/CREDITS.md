@@ -23,3 +23,5 @@ Wind, rigging whistle, sail flogging and hull water rush are synthesised in code
 | skel-roar-1, skel-roar-3, skel-rasp-1..3, skel-grunt-1..2 (excerpts, normalised) | [Monster growls.ogg](https://commons.wikimedia.org/wiki/File:Monster_growls.ogg) | stilgar | Public domain |
 | skel-roar-2 (normalised) | [Zombie moan.ogg](https://commons.wikimedia.org/wiki/File:Zombie_moan.ogg) | gregoryweir | Public domain |
 | skel-rasp-5, skel-grunt-3 (excerpts, denoised, normalised) | [Zombie-Gutteral-Sounds.ogg](https://commons.wikimedia.org/wiki/File:Zombie-Gutteral-Sounds.ogg) | Wowsuchthings | CC BY-SA 4.0 |
+| gulp-1 (gain) | [Swallowing gulp.ogg](https://commons.wikimedia.org/wiki/File:Swallowing_gulp.ogg) | gregoryweir | Public domain |
+| gulp-2, swig (excerpts, normalised) | [Drinking a glass of wat.ogg](https://commons.wikimedia.org/wiki/File:Drinking_a_glass_of_wat.ogg) | ezwa | Public domain |
