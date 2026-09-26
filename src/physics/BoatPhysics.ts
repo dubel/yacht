@@ -113,6 +113,14 @@ export class BoatPhysics {
   // telemetry
   aws = 0; awa = 0; tws = 0; twa = 0; heel = 0; pitch = 0; leeway = 0; sailAoa = 0;
   grounded = false;
+  /**
+   * Structures in the water the hull can't pass through (Tortuga's piers and wharves): at (x, z), the way
+   * out (m, world x and z) if it is inside one, else null. The hull comes up against them as against fenders:
+   * pushed out, springy but well damped, and dragged along them a little.
+   */
+  fenders: ((x: number, z: number) => [number, number] | null) | null = null;
+  /** touching a structure this step */
+  alongside = false;
   speed = 0;
 
   readonly mass: number;
@@ -316,6 +324,7 @@ export class BoatPhysics {
     // ---- buoyancy + heave/roll/pitch damping ----
     let wetArea = 0;
     this.grounded = false;
+    this.alongside = false;
     this.up.set(0, 1, 0).applyQuaternion(q);
     for (const p of this.points) {
       r.copy(p.local).applyQuaternion(q);
@@ -348,6 +357,24 @@ export class BoatPhysics {
         if (hv > 1e-4) f.multiplyScalar((Math.max(n, 0) * 0.5 * this.groundGrip) / Math.max(hv, 0.3));
         f.y = Math.max(n, 0);
         this.addForce(f, r);
+      }
+      // against a pier, a wharf
+      const out = this.fenders?.(wx, wz);
+      if (out) {
+        const pen = Math.hypot(out[0], out[1]);
+        if (pen > 1e-3) {
+          this.alongside = true;
+          const nx = out[0] / pen, nz = out[1] / pen;
+          this.pointVel(r, v);
+          const vn = v.x * nx + v.z * nz;
+          // (per point: a soft spring, damped hard — the more so as she springs back — so a few points in
+          // contact bring her up within a metre or so and she doesn't bounce off)
+          const push = Math.max(0, this.mass * (0.8 * Math.min(pen, 2) - (vn < 0 ? 1.4 : 3) * vn));
+          const tx = v.x - vn * nx, tz = v.z - vn * nz, tv = Math.hypot(tx, tz);
+          const rub = tv > 1e-3 ? (0.25 * push) / Math.max(tv, 0.3) : 0;
+          f.set(nx * push - tx * rub, 0, nz * push - tz * rub);
+          this.addForce(f, r);
+        }
       }
     }
     const immersion = clamp(wetArea / 60, 0, 1);

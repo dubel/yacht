@@ -1,5 +1,5 @@
 import { fbm, smoothstep, vnoise } from '../core/noise';
-import { boxIsOpenOcean, featuresNear, terrainHeight } from '../world/WorldGen';
+import { boxIsOpenOcean, featuresNear, terrainHeight, TORTUGA } from '../world/WorldGen';
 import { CELL, type Discovery } from './Discovery';
 
 /*
@@ -45,6 +45,23 @@ export interface ChartOverlay {
 
 export const INK = 'rgb(62, 38, 20)';
 const FONT = "'IM Fell English', 'Iowan Old Style', Georgia, 'Times New Roman', serif";
+/** graphite: what is known only from sailors' tales, sketched in pencil (Tortuga, before it is seen) */
+const PENCIL = 'rgba(52, 50, 54, 0.62)';
+
+/** Tortuga's coastline (world x, z round it), found once from the heightfield */
+let tortugaCoast: number[] | null = null;
+function tortugaOutline(): number[] {
+  if (tortugaCoast) return tortugaCoast;
+  const out: number[] = [];
+  for (let k = 0; k < 144; k++) {
+    const a = (k / 144) * Math.PI * 2, c = Math.cos(a), s = Math.sin(a);
+    // outward from the middle to where the land ends
+    let r = 0;
+    for (let d = 4; d < TORTUGA.radius * 1.6; d += 4) if (terrainHeight(TORTUGA.x + c * d, TORTUGA.z + s * d) > 0) r = d;
+    out.push(TORTUGA.x + c * r, TORTUGA.z + s * r);
+  }
+  return (tortugaCoast = out);
+}
 
 // ---------------------------------------------------------------- aged paper (generated once)
 
@@ -277,6 +294,9 @@ export class ChartRenderer {
     ik.globalCompositeOperation = 'source-over';
     ctx.drawImage(this.ink, 0, 0);
 
+    // ---- Tortuga, not yet seen: every sailor knows where it lies — sketched in pencil from their tales ----
+    if (!this.discovery.isSeen(TORTUGA.x, TORTUGA.z)) this.drawSketch(ctx, X, Y, px);
+
     // ---- rhumb lines + compass rose ----
     if (o.rose) this.drawRose(ctx, o.rose.x, o.rose.y, o.rose.r, w, h, px);
 
@@ -480,6 +500,33 @@ export class ChartRenderer {
     ctx.restore();
   }
 
+  /** a pencil sketch of Tortuga's coast: two light, slightly unsteady strokes and a little shading inside */
+  private drawSketch(ctx: CanvasRenderingContext2D, X: (x: number) => number, Y: (z: number) => number, px: number): void {
+    const c = tortugaOutline();
+    ctx.save();
+    ctx.lineJoin = ctx.lineCap = 'round';
+    const path = (jit: number, seed: number) => {
+      ctx.beginPath();
+      for (let k = 0; k <= c.length; k += 2) {
+        const i = k % c.length;
+        const j = jit * (vnoise(i * 0.37 + seed, seed * 3.1) - 0.5) * px;
+        (k === 0 ? ctx.moveTo : ctx.lineTo).call(ctx, X(c[i]) + j, Y(c[i + 1]) - j);
+      }
+    };
+    path(0, 0);
+    ctx.fillStyle = 'rgba(60, 58, 62, 0.07)';
+    ctx.fill();
+    ctx.strokeStyle = PENCIL;
+    ctx.lineWidth = 0.9 * px;
+    path(2.2, 1.7);
+    ctx.stroke();
+    ctx.globalAlpha = 0.55;
+    ctx.lineWidth = 0.6 * px;
+    path(3.4, 5.3);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   private drawLabels(ctx: CanvasRenderingContext2D, v: ChartView, X: (x: number) => number, Y: (z: number) => number, px: number, reserved: [number, number, number, number][]): void {
     const R = Math.hypot(v.w, v.h) * 0.5 * v.mpp;
     ctx.save();
@@ -491,10 +538,13 @@ export class ChartRenderer {
       // big places always, small ones only when zoomed in
       const onScreen = (f.radius * 2) / v.mpp;
       if (f.kind === 'rock' || f.kind === 'cay' ? onScreen < 5 : onScreen < 2.5) continue;
-      if (!this.discovery.isSeen(f.x, f.z)) continue;
+      // (Tortuga is on every chart, seen or not: in ink once seen, in pencil till then)
+      const seen = this.discovery.isSeen(f.x, f.z);
+      if (!seen && f.kind !== 'tortuga') continue;
       const name = f.name;
-      const size = Math.round((f.kind === 'home' || f.kind === 'atoll' ? 15 : 12) * px);
+      const size = Math.round((f.kind === 'tortuga' ? 17 : f.kind === 'home' || f.kind === 'atoll' ? 15 : 12) * px);
       ctx.font = `italic ${size}px ${FONT}`;
+      ctx.fillStyle = seen ? INK : PENCIL;
       const tw = ctx.measureText(name).width;
       // under the island / below the ring of a lagoon, out of the way of the boat and the track inside
       const x = X(f.x), y = Y(f.z) + f.radius / v.mpp + size * (f.kind === 'home' || f.kind === 'atoll' ? 0.9 : 1);

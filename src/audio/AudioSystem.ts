@@ -217,9 +217,11 @@ export class AudioSystem {
   }
 
   /** a footfall ashore: in sand, in grass, or wading (a slosh, deeper the more water) */
-  groundStep(pace: number, ground: 'sand' | 'grass' | 'water', weight = 1, wade = 0): void {
+  groundStep(pace: number, ground: 'sand' | 'grass' | 'water' | 'wood', weight = 1, wade = 0): void {
     const ctx = this.ctx;
     if (!ctx) return;
+    // (boards ashore — a pier, a wharf — sound as the deck does)
+    if (ground === 'wood') { this.footstep(pace, weight); return; }
     this.foot = -this.foot;
     if (ground === 'water') {
       const name = (['splash-1', 'splash-2', 'splash-3'] as const)[Math.floor(Math.random() * 3)];

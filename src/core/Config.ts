@@ -11,6 +11,7 @@
 //   ?speed=4          start the boat moving (m/s), for wake checks
 //   ?seed=7           procedural world beyond the home lagoon (default 1337)
 //   ?location=skull  start ashore at the Skull Island's cave, the ship at anchor off it
+//   ?location=tortuga  start on Tortuga's waterfront, the ship made fast alongside a wharf
 //   ?worldStateReset  every place as at the start of the world: guards back, treasure full (see worldState.ts)
 //   ?flamingos=true   the home lagoon's mudflats and the flamingo flocks on them (off by default)
 //   ?inventory=all    everything there is to find, into the bag (debug); =reset: the starting kit again;

@@ -45,6 +45,7 @@ import { Status } from '../ui/Status';
 import { Vomit } from '../fpv/Vomit';
 import { OFF } from '../boat/DeckMap';
 import { SkullIsland } from '../world/SkullIsland';
+import { Tortuga } from '../world/Tortuga';
 import { resetWorldState } from '../gameplay/worldState';
 import { SKULL_ISLAND } from '../world/WorldGen';
 import type { Weapon } from '../fpv/Weapons';
@@ -113,7 +114,9 @@ export class Game {
   /** the sailor ashore (rowed there from the ship at anchor, B) */
   land!: LandWalker;
   landing!: Landing;
-  get ashore(): boolean { return this.landing?.ashore ?? false; }
+  /** Tortuga's waterfront: its piers, and going ashore there straight from the ship */
+  tortuga!: Tortuga;
+  get ashore(): boolean { return (this.landing?.ashore ?? false) || (this.tortuga?.ashore ?? false); }
   /** first person: on deck or ashore */
   get fpv(): boolean { return this.onDeck || this.ashore; }
   private deepSaid = -Infinity;
@@ -417,8 +420,17 @@ export class Game {
       hours: (h) => { this.clock.advance(h); this.clouds.skip(h * 3600, { x: this.wind.dir.x * this.wind.speed, z: this.wind.dir.z * this.wind.speed }); },
     });
     this.land.obstacles = this.landing.obstacles;
-    this.land.blocked = (x, z) => this.skull.blocked(x, z);
-    await this.landing.load('assets/boats/jollyboat.glb');
+    this.tortuga = new Tortuga({
+      say: (text, s) => this.messages.say(text, s),
+      moor: () => { this.anchor.dropNow(); this.physics.setSails(false); this.physics.sailsUp = 0; this.messages.say('Cumy na keję! Statek przycumowany.', 3); },
+      goAshore: (stand, yaw) => this.goAshore(stand, yaw),
+      comeAboard: () => this.setOnDeck(true),
+    });
+    this.land.blocked = (x, z) => this.skull.blocked(x, z) || this.tortuga.blocked(x, z);
+    this.land.floorAt = (x, z) => this.tortuga.floorAt(x, z);
+    this.physics.fenders = (x, z) => this.tortuga.push(x, z);
+    await Promise.all([this.landing.load('assets/boats/jollyboat.glb'), this.tortuga.load()]);
+    this.scene.add(this.tortuga.group);
     this.scene.add(this.landing.group);
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
     this.scene.add(this.fish.mesh, this.gulls.mesh);
@@ -449,6 +461,7 @@ export class Game {
     };
     this.map = new MapUI(this.discovery, Config.worldSeed);
     if (Config.location === 'skull') this.startAtSkull();
+    if (Config.location === 'tortuga') this.startAtTortuga();
     this.lastHours = this.clock.day * 24 + this.clock.hours;
     progress(1);
 
@@ -601,9 +614,15 @@ export class Game {
     this.messages.update(stepDt);
     this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
     this.anchor.update(stepDt, this.input.wasPressed('KeyZ') && !this.ashore, this.wind.speed, this.kedge.state !== 'afloat');
+    // (at Tortuga the ship goes alongside a pier and B takes him straight ashore: no jolly boat)
+    const bKey = this.input.wasPressed('KeyB') && !this.map.open;
+    const info = this.boat.info;
+    const quay = !this.landing.ashore && this.tortuga.update(stepDt,
+      { origin: body.origin, heading: body.heading, speed: body.speed, bow: info.hullBow, stern: info.hullStern, beam: info.beam },
+      this.tortuga.ashore ? this.land.pos : null, bKey, !this.gunSight.active);
     this.landing.update(stepDt, {
-      canGo: this.anchor.riding && !this.gunSight.active, ship: body.origin,
-      sailor: this.ashore ? this.land.pos : null, b: this.input.wasPressed('KeyB') && !this.map.open,
+      canGo: this.anchor.riding && !this.gunSight.active && !quay, ship: body.origin,
+      sailor: this.landing.ashore ? this.land.pos : null, b: bKey && !quay,
     });
     // a squall coming on: the call to strike sail; laid over past ~78°: the crew lets everything fly
     if (this.weather.kind !== this.lastWeather) {
@@ -957,6 +976,19 @@ export class Game {
   }
 
   /** ?location=skull: the ship at anchor off the Skull Island, the sailor ashore before the cave's mouth */
+  /** ?location=tortuga: the ship made fast alongside the big wharf, the sailor on its boards beside her */
+  private startAtTortuga(): void {
+    const body = this.physics, info = this.boat.info;
+    const b = this.tortuga.berthFor({ bow: info.hullBow, stern: info.hullStern, beam: info.beam });
+    body.reset(new THREE.Vector3(b.x, 0, b.z), Math.PI - b.heading, 0);
+    body.setSails(false);
+    body.sailsUp = 0;
+    body.applyVisuals(this.boat, 0);
+    this.boat.root.updateMatrixWorld(true);
+    this.anchor.dropNow();
+    this.tortuga.goAshoreNow({ origin: body.origin, heading: body.heading, speed: 0, bow: info.hullBow, stern: info.hullStern, beam: info.beam });
+  }
+
   private startAtSkull(): void {
     const body = this.physics;
     // off the island's side that faces home, ~65 m out from its beach, bow toward it

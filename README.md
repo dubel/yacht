@@ -153,6 +153,11 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
 - **Flamingi**: „Flamingo - Animated Low Poly” — WildPoly3D, [Sketchfab](https://sketchfab.com/3d-models/flamingo-animated-low-poly-94d6867725014747b22e37404831fdf9),
   **CC-BY-NC-4.0 — tylko niekomercyjnie: przed komercjalizacją gry trzeba go wymienić albo kupić licencję
   komercyjną u autora.** Wersja zoptymalizowana w `public/assets/life/` (`npm run optimize-life`; oryginał w `assets/`).
+- **Tortuga — nabrzeże**, wersje zoptymalizowane w `public/assets/tortuga/` (`npm run optimize-tortuga`; oryginały w `assets/`):
+  „Rustic Wooden Dock” — Evan16, „Low Poly Dock” — tomk6505, „elven wharf” — valentin321, „Dock Pier” — pixol3d,
+  „The Gorilla Tag Beach Dock” — KPMisParrot, wszystkie **CC-BY-4.0**, Sketchfab;
+  „Dock House - Stylized Wooden Pier” — voyoo, **licencja Sketchfab Standard** (użycie w grze dozwolone, bez
+  redystrybucji samego modelu — sprawdzić warunki przed komercjalizacją).
 - **Clearwater** — © 2026 Lumaris (Aurélien), licencja **MIT** (`third_party/clearwater/LICENSE`).
   Z Clearwatera pochodzą: spektrum i GPU FFT, symulacja ripples, kaustyki z dyspersją, model optyczny wody
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing

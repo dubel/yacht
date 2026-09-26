@@ -27,6 +27,12 @@ export interface Island {
   shore?: number;
   /** a level plateau round the middle, radius r (m) at height h (a place to build on: the Skull Island's rocks) */
   flat?: { r: number; h: number };
+  /**
+   * A harbour on its east side (Tortuga): a straight quay `x` m east of the middle, `half` m either way along
+   * it (north–south); the land behind it levelled at `land` m, the water before it dredged to `depth` m right
+   * up to the quay wall, so a ship can lie alongside the piers.
+   */
+  harbour?: { x: number; half: number; land: number; depth: number };
 }
 
 /** a ring reef enclosing a shallow lagoon, with navigable passes */
@@ -46,7 +52,7 @@ export interface Lagoon {
 }
 
 type Feature =
-  | { kind: 'island'; isl: Island; reach: number; name: string }
+  | { kind: 'island'; isl: Island; reach: number; name: string; tortuga?: boolean }
   | { kind: 'lagoon'; lag: Lagoon; reach: number; name: string };
 
 /** what a chart calls an island: a rock stack, a sandy cay, or an island */
@@ -87,6 +93,29 @@ const smax = (a: number, b: number, k: number) => {
 };
 
 function islandHeight(isl: Island, x: number, z: number): number {
+  const h = islandShape(isl, x, z);
+  return isl.harbour ? harbourCut(isl, isl.harbour, h, x, z) : h;
+}
+
+/** the harbour cut into an island's east side: the quay levelled, the basin before it deep */
+function harbourCut(isl: Island, H: NonNullable<Island['harbour']>, h: number, x: number, z: number): number {
+  const lx = x - isl.x, lz = z - isl.z;
+  const band = smoothstep(H.half + 30, H.half, Math.abs(lz));
+  if (band <= 0) return h;
+  let cut: number;
+  if (lx < H.x) {
+    // the quay and the ground behind it: level
+    const k = smoothstep(H.x - 70, H.x - 25, lx);
+    cut = h + (H.land - h) * k;
+  } else {
+    // the quay wall, then the dredged basin (never higher than it was), opening out to sea
+    const wall = H.land + (H.depth - H.land) * smoothstep(H.x, H.x + 2.5, lx);
+    cut = Math.min(h, wall);
+  }
+  return h + (cut - h) * band;
+}
+
+function islandShape(isl: Island, x: number, z: number): number {
   let dx = x - isl.x, dz = z - isl.z;
   if (isl.stretch) {
     const [cx, cz, s] = isl.stretch;
@@ -185,17 +214,35 @@ const HOME_ISLANDS = HOME.islands;
 const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME), name: 'Laguna Karmazynowa' };
 
 /**
+ * Tortuga: the pirates' haven, the heart of the adventures — a big, low, flat island, always in the same place,
+ * whatever the seed: due west of the home lagoon, some 1.8 km from its middle (~8–10 minutes' sail). Its east
+ * side is the harbour: a long straight quay, the ground behind it level, the basin before it deep enough for
+ * the ship to come alongside the piers the Tortuga module builds out from it.
+ */
+export const TORTUGA: Island = {
+  x: -1800, z: 0, radius: 265, peak: 2.6, rock: 0.08, shore: 1.3,
+  harbour: { x: 175, half: 175, land: 2, depth: -7 },
+};
+/** the quay line (world x) and its ends (world z) */
+export const TORTUGA_QUAY = { x: TORTUGA.x + TORTUGA.harbour!.x, z0: TORTUGA.z - TORTUGA.harbour!.half, z1: TORTUGA.z + TORTUGA.harbour!.half, land: TORTUGA.harbour!.land };
+const TORTUGA_FEATURE: Feature = { kind: 'island', isl: TORTUGA, reach: islandReach(TORTUGA), name: 'Tortuga', tortuga: true };
+
+/**
  * The Skull Island: hand-made (a wooded hill with a level plateau in the middle, where the rocks and the cave
  * stand — SkullIsland builds them), but where it lies is the world's: somewhere round the home lagoon, in
- * any direction, 900–1550 m from its middle — some 4–8 minutes' sail from the start to its beach (at ~3 m/s).
- * Set with the world seed (placeSkull); read its x, z only after that.
+ * any direction but Tortuga's, 1800–3100 m from its middle — a long sail. Set with the world seed
+ * (placeSkull); read its x, z only after that.
  */
 export const SKULL_ISLAND: Island = { x: -1050, z: 60, radius: 150, peak: 14, rock: 0.3, flat: { r: 62, h: 4 } };
 function placeSkull(): void {
   const rnd = mulberry32(Math.imul(SEED, 0x9e3779b1) ^ 0x5c011);
-  const a = rnd() * Math.PI * 2, d = 900 + rnd() * 650;
-  SKULL_ISLAND.x = Math.round(Math.cos(a) * d);
-  SKULL_ISLAND.z = Math.round(Math.sin(a) * d);
+  for (let k = 0; k < 40; k++) {
+    const a = rnd() * Math.PI * 2, d = 1800 + rnd() * 1300;
+    SKULL_ISLAND.x = Math.round(Math.cos(a) * d);
+    SKULL_ISLAND.z = Math.round(Math.sin(a) * d);
+    // well clear of Tortuga (the two islands' seas apart)
+    if (Math.hypot(SKULL_ISLAND.x - TORTUGA.x, SKULL_ISLAND.z - TORTUGA.z) > 1500) break;
+  }
 }
 const SKULL_FEATURE: Feature = { kind: 'island', isl: SKULL_ISLAND, reach: islandReach(SKULL_ISLAND), name: 'Wyspa Czaszek' };
 const cellCache = new Map<number, Feature[]>();
@@ -283,12 +330,14 @@ function cellFeatures(i: number, j: number): Feature[] {
     // the ocean around the home lagoon stays open for a while: no features overlapping its reef or slope
     const [fx, fz] = featureCenter(f);
     if (Math.hypot(fx, fz) < HOME_FEATURE.reach + f.reach + 300) continue;
-    // …and round the Skull Island
+    // …and round the Skull Island and Tortuga
     if (Math.hypot(fx - SKULL_ISLAND.x, fz - SKULL_ISLAND.z) < SKULL_FEATURE.reach + f.reach + 200) continue;
+    if (Math.hypot(fx - TORTUGA.x, fz - TORTUGA.z) < TORTUGA_FEATURE.reach + f.reach + 400) continue;
     out.push(f);
   }
   if (i === 0 && j === 0) out.push(HOME_FEATURE);
   if (i === Math.floor(SKULL_ISLAND.x / CELL) && j === Math.floor(SKULL_ISLAND.z / CELL)) out.push(SKULL_FEATURE);
+  if (i === Math.floor(TORTUGA.x / CELL) && j === Math.floor(TORTUGA.z / CELL)) out.push(TORTUGA_FEATURE);
   cellCache.set(key, out);
   return out;
 }
@@ -331,7 +380,7 @@ export function boxIsOpenOcean(x0: number, z0: number, x1: number, z1: number): 
 /** island summaries for debugging / maps */
 export function featuresNear(x: number, z: number, radius: number): { kind: string; name: string; x: number; z: number; radius: number }[] {
   return featuresIn(x - radius, z - radius, x + radius, z + radius, []).map((f) =>
-    f.kind === 'island' ? { kind: islandKind(f.isl), name: f.name, x: f.isl.x, z: f.isl.z, radius: f.isl.radius }
+    f.kind === 'island' ? { kind: f.tortuga ? 'tortuga' : islandKind(f.isl), name: f.name, x: f.isl.x, z: f.isl.z, radius: f.isl.radius }
       : { kind: f === HOME_FEATURE ? 'home' : 'atoll', name: f.name, x: f.lag.x, z: f.lag.z, radius: f.lag.radius });
 }
 

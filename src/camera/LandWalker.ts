@@ -20,7 +20,7 @@ const CLIMB = 0.85;
 /** deepest water one wades into (m) */
 export const WADE = 1.1;
 
-export type Ground = 'sand' | 'grass' | 'water';
+export type Ground = 'sand' | 'grass' | 'water' | 'wood';
 
 export class LandWalker {
   /** position, world x / z */
@@ -48,6 +48,8 @@ export class LandWalker {
   blocked: ((x: number, z: number) => boolean) | null = null;
   /** walked into water deeper than he dares */
   onDeep: (() => void) | null = null;
+  /** boards underfoot (Tortuga's piers): their height at (x, z), or null where there are none */
+  floorAt: ((x: number, z: number) => number | null) | null = null;
 
   private readonly vel = new THREE.Vector2();
   private vy = 0;
@@ -62,7 +64,7 @@ export class LandWalker {
   /** stand at (x, z) facing `yaw` */
   place(x: number, z: number, yaw: number): void {
     this.pos.set(x, z);
-    this.footY = terrainHeight(x, z);
+    this.footY = this.floor(x, z);
     this.yaw = yaw;
     this.pitch = -0.05;
     this.vel.set(0, 0);
@@ -70,20 +72,27 @@ export class LandWalker {
     this.trunksAt.set(Infinity, Infinity);
   }
 
+  /** the height of what he stands on at (x, z): boards, or the ground */
+  private floor(x: number, z: number): number {
+    return this.floorAt?.(x, z) ?? terrainHeight(x, z);
+  }
+
   /** what is underfoot here */
   ground(): Ground {
+    if (this.floorAt?.(this.pos.x, this.pos.y) != null) return 'wood';
     if (this.wade > 0.12) return 'water';
     return terrainHeight(this.pos.x, this.pos.y) < 2.2 ? 'sand' : 'grass';
   }
 
   /** can he step to (x, z) from where he is? */
   private canMove(x: number, z: number): boolean {
-    const g = terrainHeight(x, z);
+    const g = this.floor(x, z);
     if (g < -WADE) { this.onDeep?.(); return false; }
     if (this.blocked?.(x, z)) return false;
-    const here = terrainHeight(this.pos.x, this.pos.y), run = Math.hypot(x - this.pos.x, z - this.pos.y);
-    // uphill only where it isn't too steep (down, anything)
-    return g - here <= CLIMB * run + 1e-4;
+    const here = this.floor(this.pos.x, this.pos.y), run = Math.hypot(x - this.pos.x, z - this.pos.y);
+    // uphill only where it isn't too steep (down, anything); boards: a step up, as onto a pier or a stair
+    const step = this.floorAt?.(x, z) != null ? 0.3 : 0;
+    return g - here <= Math.max(CLIMB * run, step) + 1e-4;
   }
 
   update(dt: number, input: Input, camera: THREE.PerspectiveCamera): void {
@@ -116,7 +125,7 @@ export class LandWalker {
     }
 
     // ---- feet on the ground ----
-    const floor = terrainHeight(this.pos.x, this.pos.y);
+    const floor = this.floor(this.pos.x, this.pos.y);
     this.wade = Math.max(0, -floor);
     if (!this.airborne && input.wasPressed('Space') && this.wade < 0.6) {
       this.airborne = true;

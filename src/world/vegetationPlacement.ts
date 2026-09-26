@@ -1,5 +1,5 @@
 import { fbm, smoothstep } from '../core/noise';
-import { SKULL_ISLAND, terrainHeight } from './WorldGen';
+import { SKULL_ISLAND, TORTUGA_QUAY, terrainHeight } from './WorldGen';
 
 /*
  * Where plants grow (runs in the terrain worker): palms along the beaches, rounded jungle trees on the
@@ -34,6 +34,8 @@ export function plantAt(i: number, j: number): Plant | null {
   const px = (i + hash(i, j, 1) - 0.5) * STEP, pz = (j + hash(i, j, 2) - 0.5) * STEP;
   // (nothing grows on the Skull Island's plateau: its rocks and cave stand there)
   if (Math.hypot(px - SKULL_ISLAND.x, pz - SKULL_ISLAND.z) < SKULL_ISLAND.flat!.r * 1.15) return null;
+  // (nor along Tortuga's waterfront: the quay, and the ground behind it kept for the town)
+  if (px > TORTUGA_QUAY.x - 60 && px < TORTUGA_QUAY.x + 60 && pz > TORTUGA_QUAY.z0 - 25 && pz < TORTUGA_QUAY.z1 + 25) return null;
   const h = terrainHeight(px, pz);
   if (h < VEG_MIN_H) return null;
   const e = 0.8;

@@ -30,3 +30,10 @@ assets/flamingo.glb
 assets/flamingo_-_animated_low_poly.glb
 # downloaded source recordings (cut into public/assets/audio, see CREDITS.md)
 assets/audio-src/
+# source Tortuga waterfront models — the game uses public/assets/tortuga (npm run optimize-tortuga)
+assets/dock_house_-_stylized_wooden_pier.glb
+assets/elven_wharf.glb
+assets/dock_pier.glb
+assets/low_poly_dock.glb
+assets/the_gorilla_tag_beach_dock.glb
+assets/rustic_wooden_dock.glb

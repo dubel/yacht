@@ -83,11 +83,11 @@ body.scoped #hud, body.scoped #minimap, body.scoped #help, body.scoped #toast { 
   background: rgba(0, 0, 0, 0.35); border-radius: 2px; overflow: hidden; }
 #gunsight .reload i { display: block; height: 100%; width: 100%; background: #ffb347; }
 #gunsight.ready .reload i { background: #9fe3a0; }
-#gunsight .hint, #gunhint, #landhint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); white-space: nowrap;
+#gunsight .hint, #gunhint, #landhint, .landhint { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); white-space: nowrap;
   font: 13px var(--sans); color: rgba(255, 255, 255, 0.9); text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8); }
-#gunsight kbd, #gunhint kbd, #landhint kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); }
-#gunhint, #landhint { bottom: 90px; z-index: 6; pointer-events: none; font-size: 15px; }
-body.scoped #landhint { opacity: 0; }
+#gunsight kbd, #gunhint kbd, #landhint kbd, .landhint kbd { font: 11px var(--mono); padding: 1px 5px; border-radius: 4px; background: rgba(255, 255, 255, 0.18); }
+#gunhint, #landhint, .landhint { bottom: 90px; z-index: 6; pointer-events: none; font-size: 15px; }
+body.scoped #landhint, body.scoped .landhint { opacity: 0; }
 body.manning #help, body.manning #minimap { opacity: 0.2; }
 
 /* ---- on deck: what is in hand ---- */
