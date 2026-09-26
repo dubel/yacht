@@ -168,6 +168,14 @@ transformed.y += sin(aSwim.x - position.z*2.4) * aSwim.y * (0.015 + 0.2*tail*tai
    * Once per frame. `boat` = hull origin, `bow` = world position of the stem, `heading` (rad), `speed`
    * (m/s); `ok` = conditions for an encounter (not a gale, daylight-ish).
    */
+  /** structures standing in the water (Tortuga's piers): true where one is */
+  solid: ((x: number, z: number) => boolean) | null = null;
+
+  /** open water a dolphin swims in: deep enough, and nothing built there */
+  private swimmable(x: number, z: number): boolean {
+    return terrainHeight(x, z) < -2.2 && !this.solid?.(x, z);
+  }
+
   update(dt: number, t: number, boat: THREE.Vector3, bow: THREE.Vector3, heading: number, speed: number, ok: boolean, waves: WaveField): void {
     dt = Math.min(dt, 0.1);
     const fx = Math.sin(heading), fz = Math.cos(heading);
@@ -220,6 +228,15 @@ transformed.y += sin(aSwim.x - position.z*2.4) * aSwim.y * (0.015 + 0.2*tail*tai
       const s = Math.min(sp, dl * 1.2 + (this.state === 'leave' ? sp : speed * 0.9));
       const k = 1 - Math.exp(-dt * 1.6);
       if (dl > 0.01) { d.vel.x += ((dx / dl) * s - d.vel.x) * k; d.vel.z += ((dz / dl) * s - d.vel.z) * k; }
+      // shallows, a beach, a pier ahead: turn away from it (the nearest way round), or stop short
+      if (!this.swimmable(d.pos.x + d.vel.x * 0.8, d.pos.z + d.vel.z * 0.8)) {
+        let turned = false;
+        for (const a of [0.6, -0.6, 1.2, -1.2, 1.8, -1.8, Math.PI]) {
+          const c = Math.cos(a), sn = Math.sin(a), vx = d.vel.x * c + d.vel.z * sn, vz = -d.vel.x * sn + d.vel.z * c;
+          if (this.swimmable(d.pos.x + vx * 0.8, d.pos.z + vz * 0.8)) { d.vel.x = vx; d.vel.z = vz; turned = true; break; }
+        }
+        if (!turned) d.vel.x = d.vel.z = 0;
+      }
       d.pos.x += d.vel.x * dt;
       d.pos.z += d.vel.z * dt;
       const hv = Math.hypot(d.vel.x, d.vel.z);
@@ -238,7 +255,9 @@ transformed.y += sin(aSwim.x - position.z*2.4) * aSwim.y * (0.015 + 0.2*tail*tai
         // (a breath: the back and fin roll out of the water)
         if (d.mode === 1) { target = surf + 0.02; d.modeT -= dt; if (d.modeT <= 0) { d.mode = 0; d.nextBreath = 4 + Math.random() * 5; } }
         else if (d.nextBreath <= 0 && this.state !== 'leave') { d.mode = 1; d.modeT = 1.2; }
-        if (d.nextLeap <= 0 && d.mode !== 1 && this.state !== 'leave' && hv > 2.5 && d.pos.y > surf - 1.6 && bed < -3) {
+        // (a leap only over open water, and only where it will come down in it)
+        if (d.nextLeap <= 0 && d.mode !== 1 && this.state !== 'leave' && hv > 2.5 && d.pos.y > surf - 1.6 && bed < -3
+          && this.swimmable(d.pos.x + d.vel.x * 1.6, d.pos.z + d.vel.z * 1.6)) {
           // a leap: out of the water in an arc ~1.5 m high
           d.mode = 2;
           d.vy = 5 + Math.random() * 1.6;

@@ -429,6 +429,7 @@ export class Game {
     this.land.blocked = (x, z) => this.skull.blocked(x, z) || this.tortuga.blocked(x, z);
     this.land.floorAt = (x, z) => this.tortuga.floorAt(x, z);
     this.physics.fenders = (x, z) => this.tortuga.push(x, z);
+    this.dolphins.solid = (x, z) => this.tortuga.push(x, z) !== null;
     await Promise.all([this.landing.load('assets/boats/jollyboat.glb'), this.tortuga.load()]);
     this.scene.add(this.tortuga.group);
     this.scene.add(this.landing.group);
@@ -648,7 +649,8 @@ export class Game {
       const cam = this.cam.camera, right = new THREE.Vector3().setFromMatrixColumn(cam.matrixWorld, 0);
       this.gulls.update(stepDt, t, o, stern, body.speed, ok, this.waves, cam.position, right);
       const bow = new THREE.Vector3(o.x + Math.sin(h) * this.boat.info.hullBow, 0, o.z + Math.cos(h) * this.boat.info.hullBow);
-      this.dolphins.update(stepDt, t, o, bow, h, body.speed, wp.wind < 13 && this.env.night < 0.6, this.waves);
+      // (not in Tortuga's harbour: the piers, the boats, the noise of the town keep them out at sea)
+      this.dolphins.update(stepDt, t, o, bow, h, body.speed, wp.wind < 13 && this.env.night < 0.6 && !this.tortuga.near(o.x, o.z, 80), this.waves);
       // flamingos shy of a man on foot at some 30 m, of the ship (her bulk, her crew) from further
       const who = this.ashore ? this.land.pos : new THREE.Vector2(o.x, o.z);
       this.flamingos?.update(stepDt, who, this.ashore ? 30 : 70, this.cam.camera.position, this.env.night);
