@@ -16,6 +16,8 @@ export class Input {
   /** left button held */
   lmb = false;
   private ctrlAt = -1e9;
+  /** a finger last touched the screen (the mouse presses a tap makes up are not clicks) */
+  private touchAt = -1e9;
   /** lock the pointer on the next click on the canvas (set by the first-person view) */
   wantLock = false;
   /** a panel is open (the inventory): the game hears no keys but these */
@@ -38,30 +40,47 @@ export class Input {
     addEventListener('blur', () => this.down.clear());
 
     let last: { x: number; y: number } | null = null;
+    /** the finger that turns the view (one at a time: a second finger doesn't make it jump) */
+    let finger = -1;
     el.addEventListener('pointerdown', (e) => {
       // pointer locked (first-person look): clicks carry no drag, and capturing would throw InvalidStateError
       if (this.locked || e.button === 2) return;
-      if (this.wantLock) {
-        // the lock can be refused (e.g. clicked again right after Esc released it): just stay unlocked
-        try { Promise.resolve(el.requestPointerLock()).catch(() => {}); } catch { /* unsupported */ }
-        return;
+      const touch = e.pointerType === 'touch';
+      if (touch) {
+        this.touchAt = performance.now();
+        if (finger >= 0) return;
+        finger = e.pointerId;
       }
-      el.setPointerCapture(e.pointerId);
+      if (this.wantLock && !touch) {
+        // the lock can be refused (e.g. clicked again right after Esc released it), or not be there at all
+        // (Safari on the iPad): the view then turns by dragging, as the chase view does. (No capture: the lock
+        // may come a moment later, and capturing would get in its way.)
+        try { Promise.resolve(el.requestPointerLock()).catch(() => {}); } catch { /* unsupported */ }
+      } else el.setPointerCapture(e.pointerId);
       last = { x: e.clientX, y: e.clientY };
       this.dragging = true;
     });
     el.addEventListener('pointermove', (e) => {
       if (this.locked) { this.lookDX += e.movementX; this.lookDY += e.movementY; return; }
-      if (!last) return;
+      if (!last || (e.pointerType === 'touch' && e.pointerId !== finger)) return;
       this.dragDX += e.clientX - last.x;
       this.dragDY += e.clientY - last.y;
       last = { x: e.clientX, y: e.clientY };
     });
-    const end = () => { last = null; this.dragging = false; };
+    const end = (e: PointerEvent) => {
+      if (e.pointerType === 'touch') { this.touchAt = performance.now(); if (e.pointerId !== finger) return; finger = -1; }
+      last = null;
+      this.dragging = false;
+    };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
-    // right button: tracked on its own (it also arrives while the pointer is locked); no context menu
-    el.addEventListener('mousedown', (e) => { if (e.button === 2) this.rmb = true; if (e.button === 0) { this.click = true; this.lmb = true; } });
+    // right button: tracked on its own (it also arrives while the pointer is locked); no context menu.
+    // (A tap also sends a make-believe mouse press after it: that is no shot.)
+    el.addEventListener('mousedown', (e) => {
+      if (performance.now() - this.touchAt < 1000) return;
+      if (e.button === 2) this.rmb = true;
+      if (e.button === 0) { this.click = true; this.lmb = true; }
+    });
     // Ctrl+W / Ctrl+T can't be blocked; right after a Ctrl, closing the page asks first
     addEventListener('beforeunload', (e) => { if (performance.now() - this.ctrlAt < 2000) e.preventDefault(); });
     addEventListener('mouseup', (e) => { if (e.button === 2) this.rmb = false; if (e.button === 0) this.lmb = false; });
