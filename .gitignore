@@ -25,3 +25,8 @@ assets/pirate_coin.glb
 assets/skull_lantern.glb
 assets/rum_bottle.glb
 assets/bottle_of_brazilian_rum_-_j._haberfeld_factory (1).glb
+# source flamingo models — the game uses public/assets/life (npm run optimize-life)
+assets/flamingo.glb
+assets/flamingo_-_animated_low_poly.glb
+# downloaded source recordings (cut into public/assets/audio, see CREDITS.md)
+assets/audio-src/

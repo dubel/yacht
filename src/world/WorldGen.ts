@@ -67,7 +67,7 @@ const HOME: Lagoon = {
   ellipse: 1.08,
   // south-east (the original pass by the "Przejście w rafie" mark), north, west
   passes: [0.62, -1.9, 3.02],
-  passWidth: 2.5,
+  passWidth: 5,
   clearStart: true,
   islands: [
     { x: -175, z: -130, radius: 95, peak: 38, rock: 0.35 },
@@ -171,6 +171,17 @@ function featureCenter(f: Feature): [number, number] {
 /** cell size (m); every feature's reach is well under one cell, so a 3×3 neighbourhood covers any point */
 export const CELL = 2000;
 let SEED = 1337;
+/**
+ * Mudflats a hand or two under water, off the home lagoon's shores: the flamingos' feeding grounds (away from
+ * the courses out through the passes). Only with ?flamingos (see setWorldSeed).
+ */
+const MUDFLATS: Island[] = [
+  { x: 22, z: 162, radius: 32, peak: 0.12, rock: 0, stretch: [0.6, -0.8, 1.4], shore: -0.36 },
+  { x: 22, z: 258, radius: 30, peak: 0.12, rock: 0, stretch: [1, 0, 1.3], shore: -0.36 },
+  { x: -282, z: -8, radius: 30, peak: 0.12, rock: 0, stretch: [0, 1, 1.4], shore: -0.36 },
+];
+const HOME_ISLANDS = HOME.islands;
+
 const HOME_FEATURE: Feature = { kind: 'lagoon', lag: HOME, reach: lagoonReach(HOME), name: 'Laguna Karmazynowa' };
 
 /**
@@ -190,8 +201,10 @@ const SKULL_FEATURE: Feature = { kind: 'island', isl: SKULL_ISLAND, reach: islan
 const cellCache = new Map<number, Feature[]>();
 
 /** choose the procedural world (the home lagoon never changes) */
-export function setWorldSeed(seed: number): void {
+/** the world to build: its seed, and whether the home lagoon has its mudflats (?flamingos) */
+export function setWorldSeed(seed: number, mudflats = false): void {
   SEED = seed | 0;
+  HOME.islands = mudflats ? [...HOME_ISLANDS, ...MUDFLATS] : HOME_ISLANDS;
   cellCache.clear();
   placeSkull();
 }

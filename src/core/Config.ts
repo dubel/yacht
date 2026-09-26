@@ -12,6 +12,7 @@
 //   ?seed=7           procedural world beyond the home lagoon (default 1337)
 //   ?location=skull  start ashore at the Skull Island's cave, the ship at anchor off it
 //   ?worldStateReset  every place as at the start of the world: guards back, treasure full (see worldState.ts)
+//   ?flamingos=true   the home lagoon's mudflats and the flamingo flocks on them (off by default)
 //   ?inventory=all    everything there is to find, into the bag (debug); =reset: the starting kit again;
 //                     =rapier:3,lantern: those things added
 import { parseTime } from '../environment/GameTime';
@@ -32,6 +33,8 @@ export const Config = {
   startSpeed: num('speed') ?? 3,
   /** ?seed=7 procedural ocean around the home lagoon */
   worldSeed: num('seed') ?? 1337,
+  /** ?flamingos=true: the mudflats and their flamingos (off by default: they cost frame time) */
+  flamingos: Q.has('flamingos') && !['false', '0', 'off', 'no'].includes(Q.get('flamingos')!.toLowerCase()),
   initialQuality: num('q'),
   adaptiveQuality: !Q.has('t') && !Q.has('noadapt'),
 

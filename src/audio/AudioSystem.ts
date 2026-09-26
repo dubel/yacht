@@ -27,6 +27,8 @@ export interface AudioState {
   waves: number;
   /** 1 aboard … 0 ashore: the hull's creaks, the rigging's whistle and the water along her side fall away */
   aboard?: number;
+  /** a flock of flamingos near: 0 none … 1 in the middle of one */
+  flock?: number;
 }
 
 export interface ThunderEvent {
@@ -35,10 +37,10 @@ export interface ThunderEvent {
   pan: number;
 }
 
-const LOOPS = ['ocean', 'lapping', 'rain-light', 'rain-heavy', 'crickets', 'creak-loop'] as const;
+const LOOPS = ['ocean', 'lapping', 'rain-light', 'rain-heavy', 'crickets', 'creak-loop', 'flamingos'] as const;
 const SHOTS = ['thunder-1', 'thunder-2', 'thunder-3', 'thunder-4', 'thunder-5', 'gull-1', 'gull-2', 'gull-3', 'creak-1',
   'splash-big', 'splash-1', 'splash-2', 'splash-3',
-  'gulp-1', 'gulp-2', 'swig',
+  'gulp-1', 'gulp-2', 'swig', 'flamingo-1', 'flamingo-2',
   'skel-roar-1', 'skel-roar-2', 'skel-roar-3', 'skel-rasp-1', 'skel-rasp-2', 'skel-rasp-3', 'skel-rasp-5', 'skel-grunt-1', 'skel-grunt-2', 'skel-grunt-3'] as const;
 /** a skeleton's voices (recorded: monster growls and a zombie's moan — see public/assets/audio/CREDITS.md) */
 const SKEL: Record<'roar' | 'rasp' | 'grunt', ShotName[]> = {
@@ -267,6 +269,14 @@ export class AudioSystem {
     const g = (['gull-1', 'gull-2', 'gull-3'] as const)[Math.floor(Math.random() * 3)];
     const near = Math.min(1, 30 / (distance + 8));
     this.play(g, 0.15 + 0.55 * near, { pan: pan * 0.8, rate: 0.9 + Math.random() * 0.25, lowpass: 2500 + 12000 * near });
+  }
+
+  /** a flamingo honks from a real bird: pan −1…1, distance in m */
+  flamingo(pan: number, distance: number): void {
+    if (!this.ctx) return;
+    const near = Math.min(1, 25 / (distance + 6));
+    if (near < 0.06) return;
+    this.play(Math.random() < 0.6 ? 'flamingo-1' : 'flamingo-2', 0.1 + 0.5 * near, { pan: pan * 0.8, rate: 0.85 + Math.random() * 0.3, lowpass: 2000 + 12000 * near });
   }
 
   /**
@@ -739,6 +749,7 @@ export class AudioSystem {
     loop('rain-light', air * Math.min(1, s.rain * 2) * (1 - s.rain) * 0.9 + air * 0.25 * s.rain);
     loop('rain-heavy', air * Math.max(0, s.rain - 0.3) * 1.1);
     loop('crickets', air * 0.5 * s.night * s.shore * (1 - s.rain));
+    loop('flamingos', air * 0.7 * (s.flock ?? 0));
     loop('creak-loop', aboard * (0.05 + Math.min(0.5, s.motion * 1.6) * (0.5 + 0.2 * s.waves)));
 
     // occasional one-shots

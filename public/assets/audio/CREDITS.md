@@ -25,3 +25,5 @@ Wind, rigging whistle, sail flogging and hull water rush are synthesised in code
 | skel-rasp-5, skel-grunt-3 (excerpts, denoised, normalised) | [Zombie-Gutteral-Sounds.ogg](https://commons.wikimedia.org/wiki/File:Zombie-Gutteral-Sounds.ogg) | Wowsuchthings | CC BY-SA 4.0 |
 | gulp-1 (gain) | [Swallowing gulp.ogg](https://commons.wikimedia.org/wiki/File:Swallowing_gulp.ogg) | gregoryweir | Public domain |
 | gulp-2, swig (excerpts, normalised) | [Drinking a glass of wat.ogg](https://commons.wikimedia.org/wiki/File:Drinking_a_glass_of_wat.ogg) | ezwa | Public domain |
+| flamingo-1, flamingo-2 (single calls, excerpts, normalised) | [Phoenicopterus roseus - Greater Flamingo XC432217.mp3](https://commons.wikimedia.org/wiki/File:Phoenicopterus_roseus_-_Greater_Flamingo_XC432217.mp3) | Joost van Bruggen | CC BY-SA 4.0 |
+| flamingos.mp3 (17 s loop, crossfaded, normalised) | [Phoenicopterus roseus (Rosaflamingo - Greater Flamingo) — Weltvogelpark Walsrode 2013.ogg](https://commons.wikimedia.org/wiki/File:Phoenicopterus_roseus_(Rosaflamingo_-_Greater_Flamingo)_%E2%80%94_Weltvogelpark_Walsrode_2013.ogg) | Olaf Oliviero Riemer | CC BY-SA 3.0 |

@@ -1,0 +1,34 @@
+// dev view of the flamingo model's clips: /tools/dev/flamingo.html?t=0.3&view=side — one bird per clip, side by side
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js';
+const Q = new URLSearchParams(location.search);
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c') as HTMLCanvasElement, antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setClearColor(0x7a8a99);
+const scene = new THREE.Scene();
+const sun = new THREE.DirectionalLight(0xffffff, 2); sun.position.set(2, 4, 3);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 2.5), sun, new THREE.AxesHelper(1));
+const loader = new GLTFLoader(); loader.setMeshoptDecoder(MeshoptDecoder);
+const gltf = await loader.loadAsync('assets/life/flamingo.glb');
+const t = +(Q.get('t') ?? 0);
+const out: string[] = [];
+gltf.animations.forEach((clip, i) => {
+  const model = clone(gltf.scene);
+  model.position.x = (i - 2) * 2.4;
+  scene.add(model);
+  const mixer = new THREE.AnimationMixer(model);
+  mixer.clipAction(clip).play();
+  mixer.setTime(t * clip.duration);
+  model.updateMatrixWorld(true);
+  const w = (n: string) => { const b = model.getObjectByName(n)!; return b.getWorldPosition(new THREE.Vector3()).sub(model.position).toArray().map((v) => +v.toFixed(2)); };
+  out.push(`${clip.name.split('|').pop()} ${clip.duration.toFixed(2)}s head ${w('headx_013')} footL ${w('footl_037')} footR ${w('footr_043')} root ${w('rootx_02')}`);
+});
+const cam = new THREE.PerspectiveCamera(35, innerWidth / innerHeight, 0.1, 100);
+const view = Q.get('view') ?? 'side';
+if (view === 'side') cam.position.set(0, 1.2, 14); else if (view === 'front') cam.position.set(14, 1.2, 0); else cam.position.set(9, 6, 9);
+cam.lookAt(0, 0.9, 0);
+renderer.render(scene, cam);
+(window as unknown as { __out: string; __ready: boolean }).__out = out.join('\n');
+(window as unknown as { __ready: boolean }).__ready = true;

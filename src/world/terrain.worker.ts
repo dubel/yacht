@@ -35,13 +35,13 @@ export interface TileResult {
 
 // (typed by hand: the "webworker" lib would replace the DOM types for the whole project)
 const ctx = self as unknown as {
-  onmessage: ((e: MessageEvent<TileRequest | { seed: number }>) => void) | null;
+  onmessage: ((e: MessageEvent<TileRequest | { seed: number; mudflats: boolean }>) => void) | null;
   postMessage(m: TileResult, transfer?: Transferable[]): void;
 };
 
 ctx.onmessage = (e) => {
   const m = e.data;
-  if ('seed' in m) { setWorldSeed(m.seed); return; }
+  if ('seed' in m) { setWorldSeed(m.seed, m.mudflats); return; }
   const { id, x0, z0, size, n, skirt, veg } = m;
   const step = size / n, W = n + 3;
   // heights with a 1-sample ring: H[(j+1)*W + (i+1)] is grid vertex (i, j)

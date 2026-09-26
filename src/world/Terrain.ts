@@ -72,9 +72,9 @@ export class Terrain {
 
   private readonly plants = new THREE.Group();
 
-  constructor(pebbles: THREE.Texture, seed: number, private readonly vegetation: Vegetation) {
+  constructor(pebbles: THREE.Texture, seed: number, private readonly vegetation: Vegetation, mudflats = false) {
     // (this thread's queries — physics, the chart, the names — must see the same world as the workers build)
-    setWorldSeed(seed);
+    setWorldSeed(seed, mudflats);
     this.pebbles = { value: pebbles };
     this.material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
     this.material.onBeforeCompile = (sh) => this.patchShader(sh);
@@ -84,7 +84,7 @@ export class Terrain {
     const count = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) - 1));
     for (let w = 0; w < count; w++) {
       const worker = new Worker(new URL('./terrain.worker.ts', import.meta.url), { type: 'module' });
-      worker.postMessage({ seed });
+      worker.postMessage({ seed, mudflats });
       worker.onmessage = (e: MessageEvent<TileResult>) => {
         const job = this.jobs.get(e.data.id);
         if (!job) return;

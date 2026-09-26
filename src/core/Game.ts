@@ -23,6 +23,7 @@ import { MapUI } from '../map/MapUI';
 import { DeckMap } from '../boat/DeckMap';
 import { FishLife } from '../life/Fish';
 import { Gulls } from '../life/Gulls';
+import { Flamingos } from '../life/Flamingos';
 import { Dolphins } from '../life/Dolphins';
 import { Splash } from '../life/Splash';
 import { DeckWalker } from '../camera/DeckWalker';
@@ -96,6 +97,8 @@ export class Game {
   surf!: Surf;
   readonly fish = new FishLife();
   readonly gulls = new Gulls();
+  /** flamingos wading on the home lagoon's shallows */
+  readonly flamingos = Config.flamingos ? new Flamingos({ x: 0, z: 0 }) : null;
   readonly dolphins = new Dolphins();
   readonly splash = new Splash();
   /** F9: all the animals (fish, gulls, dolphins, their spray and calls) — off to save frame time */
@@ -254,7 +257,7 @@ export class Game {
     progress(0.1);
 
     this.vegetation = new Vegetation();
-    this.terrain = new Terrain(pebbles, Config.worldSeed, this.vegetation);
+    this.terrain = new Terrain(pebbles, Config.worldSeed, this.vegetation, Config.flamingos);
     this.scene.add(this.terrain.group);
     const start = Config.freeCam ? new THREE.Vector3(Config.freeCam[0], 0, Config.freeCam[2]) : new THREE.Vector3();
     await this.terrain.ready(start, (f) => progress(0.1 + 0.2 * f));
@@ -420,6 +423,11 @@ export class Game {
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
     this.scene.add(this.fish.mesh, this.gulls.mesh);
     this.gulls.onCall = (pan, d) => this.audio.gull(pan, d);
+    if (this.flamingos) {
+      await this.flamingos.load('assets/life/flamingo.glb');
+      this.scene.add(this.flamingos.group);
+      this.flamingos.onCall = (x, z) => { const h = this.heardFrom(x, z); this.audio.flamingo(h.pan, h.d); };
+    }
     this.scene.add(this.dolphins.mesh, this.splash.points);
     if (!this.fauna) this.setFauna(false, true);
     // where a sound comes from relative to the camera: pan −1…1 and distance
@@ -621,6 +629,9 @@ export class Game {
       this.gulls.update(stepDt, t, o, stern, body.speed, ok, this.waves, cam.position, right);
       const bow = new THREE.Vector3(o.x + Math.sin(h) * this.boat.info.hullBow, 0, o.z + Math.cos(h) * this.boat.info.hullBow);
       this.dolphins.update(stepDt, t, o, bow, h, body.speed, wp.wind < 13 && this.env.night < 0.6, this.waves);
+      // flamingos shy of a man on foot at some 30 m, of the ship (her bulk, her crew) from further
+      const who = this.ashore ? this.land.pos : new THREE.Vector2(o.x, o.z);
+      this.flamingos?.update(stepDt, who, this.ashore ? 30 : 70, this.cam.camera.position, this.env.night);
     }
     {
       // spray (dolphins, cannonballs) is white water: lit like the foam
@@ -743,7 +754,7 @@ export class Game {
     const aboard = !this.ashore;
     this.audio.update(dt, {
       windSpeed: this.wind.speed, rain: wp.rain, speed: aboard ? body.speed : 0, motion: aboard ? Math.hypot(av.x, av.z) : 0,
-      luffing: aboard && body.luffing, sailsUp: body.sailsUp, submerged, night: this.env.night, shore: this.shore,
+      luffing: aboard && body.luffing, sailsUp: body.sailsUp, submerged, night: this.env.night, shore: this.shore, flock: this.fauna ? this.flamingos?.murmur ?? 0 : 0,
       waves: wp.waves, aboard: aboard ? 1 : 0,
     });
 
@@ -798,7 +809,7 @@ export class Game {
   /** F9: animals on / off; remembered between sessions */
   setFauna(on: boolean, quiet = false): void {
     this.fauna = on;
-    for (const o of [this.fish.mesh, this.gulls.mesh, this.dolphins.mesh]) o.visible = on;
+    for (const o of [this.fish.mesh, this.gulls.mesh, this.dolphins.mesh, this.flamingos?.group]) if (o) o.visible = on;
     try { localStorage.setItem('lagoon.fauna', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
     if (!quiet) this.messages.say(on ? 'Fauna włączona (F9)' : 'Fauna wyłączona (F9)', 2.5);
   }
