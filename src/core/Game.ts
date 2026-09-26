@@ -52,7 +52,7 @@ import type { Weapon } from '../fpv/Weapons';
 import { Leadsman } from '../gameplay/Leadsman';
 import { Music, type Mood } from '../audio/Music';
 import { terrainHeight as landAt } from '../world/WorldGen';
-import { featuresNear, terrainHeight } from '../world/WorldGen';
+import { featuresNear, terrainHeight, TORTUGA_QUAY } from '../world/WorldGen';
 import { Vegetation } from '../world/Vegetation';
 import { Messages } from '../gameplay/Messages';
 import { Surf } from '../world/Surf';
@@ -461,7 +461,8 @@ export class Game {
     };
     this.map = new MapUI(this.discovery, Config.worldSeed);
     if (Config.location === 'skull') this.startAtSkull();
-    if (Config.location === 'tortuga') this.startAtTortuga();
+    if (Config.location === 'tortuga') this.startOffTortuga();
+    if (Config.location === 'tortuga-quay') this.startAtTortuga();
     this.lastHours = this.clock.day * 24 + this.clock.hours;
     progress(1);
 
@@ -976,7 +977,17 @@ export class Game {
   }
 
   /** ?location=skull: the ship at anchor off the Skull Island, the sailor ashore before the cave's mouth */
-  /** ?location=tortuga: the ship made fast alongside the big wharf, the sailor on its boards beside her */
+  /** ?location=tortuga: aboard, a kilometre off Tortuga's harbour, bow toward it, lying still */
+  private startOffTortuga(): void {
+    const body = this.physics;
+    const x = TORTUGA_QUAY.x + 1000, z = (TORTUGA_QUAY.z0 + TORTUGA_QUAY.z1) / 2;
+    // heading west (bow toward the quay): yaw −π/2; reset takes the bearing, π − yaw
+    body.reset(new THREE.Vector3(x, 0, z), Math.PI + Math.PI / 2, 0);
+    body.applyVisuals(this.boat, 0);
+    this.boat.root.updateMatrixWorld(true);
+  }
+
+  /** ?location=tortuga-quay: the ship made fast alongside the big wharf, the sailor on its boards beside her */
   private startAtTortuga(): void {
     const body = this.physics, info = this.boat.info;
     const b = this.tortuga.berthFor({ bow: info.hullBow, stern: info.hullStern, beam: info.beam });

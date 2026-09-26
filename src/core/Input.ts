@@ -18,6 +18,13 @@ export class Input {
   private ctrlAt = -1e9;
   /** a finger last touched the screen (the mouse presses a tap makes up are not clicks) */
   private touchAt = -1e9;
+  /**
+   * The pointer lock asked for and not given (Safari on the iPad has none): the mouse then turns the view by
+   * dragging instead. Where the lock works (a PC) this stays false and the mouse does exactly what it always
+   * did; it is cleared whenever a lock is granted.
+   */
+  private noLock = false;
+  private lockAsked = -1;
   /** lock the pointer on the next click on the canvas (set by the first-person view) */
   wantLock = false;
   /** a panel is open (the inventory): the game hears no keys but these */
@@ -53,9 +60,14 @@ export class Input {
       }
       if (this.wantLock && !touch) {
         // the lock can be refused (e.g. clicked again right after Esc released it), or not be there at all
-        // (Safari on the iPad): the view then turns by dragging, as the chase view does. (No capture: the lock
-        // may come a moment later, and capturing would get in its way.)
-        try { Promise.resolve(el.requestPointerLock()).catch(() => {}); } catch { /* unsupported */ }
+        // (Safari on the iPad): see noLock. (No capture: the lock may come a moment later, and capturing
+        // would get in its way.)
+        this.lockAsked = performance.now();
+        const refused = () => { this.lockAsked = -1; if (!this.locked) this.noLock = true; };
+        try { Promise.resolve(el.requestPointerLock()).catch(refused); } catch { refused(); }
+        // (no answer at all — some browsers neither lock nor say no)
+        setTimeout(() => { if (this.lockAsked >= 0 && !this.locked) refused(); }, 500);
+        if (!this.noLock) return;
       } else el.setPointerCapture(e.pointerId);
       last = { x: e.clientX, y: e.clientY };
       this.dragging = true;
@@ -86,6 +98,8 @@ export class Input {
     addEventListener('mouseup', (e) => { if (e.button === 2) this.rmb = false; if (e.button === 0) this.lmb = false; });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('blur', () => { this.rmb = this.lmb = false; });
+    document.addEventListener('pointerlockchange', () => { if (this.locked) { this.noLock = false; this.lockAsked = -1; } });
+    document.addEventListener('pointerlockerror', () => { this.lockAsked = -1; this.noLock = true; });
     el.addEventListener('wheel', (e) => { this.wheel += Math.sign(e.deltaY); e.preventDefault(); }, { passive: false });
   }
 

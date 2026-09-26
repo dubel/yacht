@@ -534,7 +534,8 @@ export class ChartRenderer {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const taken: [number, number, number, number][] = [...reserved];
-    for (const f of featuresNear(v.cx, v.cz, R).sort((a, b) => b.radius - a.radius)) {
+    // (Tortuga first, and always: no other name crowds it out)
+    for (const f of featuresNear(v.cx, v.cz, R).sort((a, b) => (b.kind === 'tortuga' ? 1e9 : b.radius) - (a.kind === 'tortuga' ? 1e9 : a.radius))) {
       // big places always, small ones only when zoomed in
       const onScreen = (f.radius * 2) / v.mpp;
       if (f.kind === 'rock' || f.kind === 'cay' ? onScreen < 5 : onScreen < 2.5) continue;
@@ -550,8 +551,9 @@ export class ChartRenderer {
       const x = X(f.x), y = Y(f.z) + f.radius / v.mpp + size * (f.kind === 'home' || f.kind === 'atoll' ? 0.9 : 1);
       const box: [number, number, number, number] = [x - tw / 2, y - size / 2, x + tw / 2, y + size / 2];
       const m = 22 * px; // clear of the torn edge
+      const always = f.kind === 'tortuga';
       if (box[0] < m || box[1] < m || box[2] > v.w - m || box[3] > v.h - m) continue;
-      if (taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
+      if (!always && taken.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])) continue;
       taken.push(box);
       ctx.fillText(name, x, y);
     }

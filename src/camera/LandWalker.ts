@@ -86,9 +86,10 @@ export class LandWalker {
 
   /** can he step to (x, z) from where he is? */
   private canMove(x: number, z: number): boolean {
+    // (what stands in the way first: off the edge of a pier is simply no further, not "too deep to wade")
+    if (this.blocked?.(x, z)) return false;
     const g = this.floor(x, z);
     if (g < -WADE) { this.onDeep?.(); return false; }
-    if (this.blocked?.(x, z)) return false;
     const here = this.floor(this.pos.x, this.pos.y), run = Math.hypot(x - this.pos.x, z - this.pos.y);
     // uphill only where it isn't too steep (down, anything); boards: a step up, as onto a pier or a stair
     const step = this.floorAt?.(x, z) != null ? 0.3 : 0;

@@ -20,7 +20,7 @@ import { TORTUGA_QUAY, terrainHeight } from './WorldGen';
 /** the height of every floor on the waterfront (m): a hand over the quay */
 const DECK = TORTUGA_QUAY.land + 0.15;
 /** how near her side (m) he must be to go aboard (a gangway is run out to the pier) */
-const BOARD_R = 7;
+const BOARD_R = 10;
 /** the boardwalk's middle, off the quay line (m, toward the water) */
 const WALK_X = 2.4;
 
@@ -193,23 +193,39 @@ export class Tortuga {
     return null;
   }
 
-  /** a place to step ashore from the ship: boards alongside her, the nearest to her middle */
+  /**
+   * A place to step ashore from the ship: the boards nearest her hull, all round it — beside her, off the bow
+   * or the stern, whichever way she lies — within reach of a gangway.
+   */
   private findBerth(s: ShipState): { stand: THREE.Vector2; yaw: number } | null {
     const fx = Math.sin(s.heading), fz = Math.cos(s.heading), rx = fz, rz = -fx;
-    const L = s.bow - s.stern, midL = (s.bow + s.stern) / 2;
-    for (const along of [0, 0.15, -0.15, 0.3, -0.3, 0.42, -0.42])
-      for (const side of [1, -1])
-        for (let out = s.beam / 2 + 0.3; out < s.beam / 2 + BOARD_R - 1; out += 0.5) {
-          const a = midL + along * L;
-          const x = s.origin.x + fx * a + rx * side * out, z = s.origin.z + fz * a + rz * side * out;
+    const hb = s.beam / 2;
+    // points round the hull's outline (her frame: along, across)
+    const rim: [number, number][] = [[s.bow, 0], [s.stern, 0]];
+    for (let k = 0; k <= 6; k++) { const a = s.stern + ((s.bow - s.stern) * k) / 6; rim.push([a, hb], [a, -hb]); }
+    let best: { d: number; x: number; z: number; ox: number; oz: number } | null = null;
+    for (const [a, c] of rim) {
+      const px = s.origin.x + fx * a + rx * c, pz = s.origin.z + fz * a + rz * c;
+      for (let k = 0; k < 16; k++) {
+        const ang = (k / 16) * Math.PI * 2, dx = Math.cos(ang), dz = Math.sin(ang);
+        for (let d = 0.5; d <= BOARD_R - 1; d += 0.5) {
+          if (best && d >= best.d) break;
+          const x = px + dx * d, z = pz + dz * d;
+          // (not inside her own hull)
+          const la = (x - s.origin.x) * fx + (z - s.origin.z) * fz, lc = (x - s.origin.x) * rx + (z - s.origin.z) * rz;
+          if (la > s.stern && la < s.bow && Math.abs(lc) < hb) continue;
           if (this.floorAt(x, z) === null || this.blocked(x, z)) continue;
-          // a little further onto the boards, if they go on (not standing on the very edge)
-          const x2 = x + rx * side * 1, z2 = z + rz * side * 1;
-          const stand = this.floorAt(x2, z2) !== null && !this.blocked(x2, z2) ? new THREE.Vector2(x2, z2) : new THREE.Vector2(x, z);
-          // facing away from her
-          return { stand, yaw: Math.atan2(rx * side, rz * side) };
+          best = { d, x, z, ox: dx, oz: dz };
+          break;
         }
-    return null;
+      }
+    }
+    if (!best) return null;
+    // a step further onto the boards if they go on (not on the very edge), facing away from her
+    const x2 = best.x + best.ox, z2 = best.z + best.oz;
+    const on = this.floorAt(x2, z2) !== null && !this.blocked(x2, z2);
+    const stand = on ? new THREE.Vector2(x2, z2) : new THREE.Vector2(best.x, best.z);
+    return { stand, yaw: Math.atan2(stand.x - s.origin.x, stand.y - s.origin.z) };
   }
 
   /** how far (m) the sailor at p is from the ship's side */
@@ -234,8 +250,9 @@ export class Tortuga {
     if (!mine || this.busy) { this.hint.hidden = true; return mine; }
     if (!this.ashore) {
       this.findT -= dt;
-      if (this.findT <= 0) { this.findT = 0.4; this.berth = this.findBerth(s); }
-      const slow = s.speed < 1.3;
+      if (this.findT <= 0) { this.findT = 0.25; this.berth = this.findBerth(s); }
+      // (no need to stop dead: under ~5 knots the crew gets lines ashore)
+      const slow = s.speed < 2.6;
       this.hint.hidden = !this.berth || !canGo;
       if (this.berth) this.hint.innerHTML = slow ? '<kbd>B</kbd> — zacumuj i zejdź na keję · Tortuga' : 'Tortuga — zwolnij, by przybić do kei';
       if (b && canGo) {
