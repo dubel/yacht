@@ -232,11 +232,14 @@ export const TORTUGA_QUAY = { x: TORTUGA.x + TORTUGA.harbour!.x, z0: TORTUGA.z -
  * there is trodden, darker sand (terrainColor); TortugaTown builds the houses round it.
  */
 export const TORTUGA_TOWN = {
-  road: { u: 10.25, half: 2.25 },
-  square: { u0: 12, u1: 40, v0: -15, v1: 15 },
+  /** the road, close behind the quay (a strip of quayside between them for cargo) */
+  road: { u: 4.5, half: 2 },
+  square: { u0: 7, u1: 33, v0: -15, v1: 15 },
   lanes: [-140, -95, -52, 50, 96, 140],
   laneHalf: 1.3,
-  /** how far inland the town reaches (the trees beyond) */
+  /** the lanes run back this far (past the second row) */
+  lanesTo: 42,
+  /** how far inland the town may reach (the trees beyond) */
   depth: 58,
 };
 
@@ -251,13 +254,13 @@ export function tortugaTrodden(x: number, z: number): number {
   let w = 0;
   // the road, and the quayside in front of it, walked less
   w = Math.max(w, smoothstep(T.road.half + 0.8, T.road.half - 0.6, Math.abs(u - T.road.u) + wob) * along);
-  w = Math.max(w, 0.45 * smoothstep(8.5, 6.5, u + wob) * smoothstep(-1, 1, u) * along);
+  w = Math.max(w, 0.45 * smoothstep(T.road.u - T.road.half + 0.5, T.road.u - T.road.half - 1, u + wob) * smoothstep(-1, 1, u) * along);
   // the square
   const S = T.square;
   const sq = Math.min(smoothstep(S.u0 - 1, S.u0 + 1, u + wob), smoothstep(S.u1 + 1, S.u1 - 1, u + wob), smoothstep(S.v0 - 1, S.v0 + 1, v + wob), smoothstep(S.v1 + 1, S.v1 - 1, v + wob));
   w = Math.max(w, sq);
   // the lanes back to the second row
-  for (const l of T.lanes) w = Math.max(w, 0.85 * smoothstep(T.laneHalf + 0.6, T.laneHalf - 0.5, Math.abs(v - l) + wob) * smoothstep(T.depth, T.depth - 4, u) * smoothstep(T.road.u, T.road.u + 2, u));
+  for (const l of T.lanes) w = Math.max(w, 0.85 * smoothstep(T.laneHalf + 0.6, T.laneHalf - 0.5, Math.abs(v - l) + wob) * smoothstep(T.lanesTo, T.lanesTo - 4, u) * smoothstep(T.road.u, T.road.u + 2, u));
   return w;
 }
 

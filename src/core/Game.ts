@@ -625,7 +625,7 @@ export class Game {
     this.anchor.update(stepDt, this.input.wasPressed('KeyZ') && !this.ashore, this.wind.speed, this.kedge.state !== 'afloat');
     // (at Tortuga the ship goes alongside a pier and B takes him straight ashore: no jolly boat)
     this.town.update(this.cam.camera.position, body.origin);
-    this.town.tick(stepDt);
+    this.town.tick(stepDt, this.cam.camera.position, 1 - this.env.night);
     if (!this.ashore) this.actionHint.hidden = true;
     const bKey = this.input.wasPressed('KeyB') && !this.map.open;
     const info = this.boat.info;

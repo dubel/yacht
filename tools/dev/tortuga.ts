@@ -17,7 +17,9 @@ const gltf = await loader.loadAsync(`assets/${Q.get('m')!.includes('/') ? Q.get(
 const t0 = performance.now();
 const m = measure(gltf.scene, { url: '', scale: +(Q.get('scale') ?? 1), turn: +(Q.get('turn') ?? 0), size: Q.get('size') ? +Q.get('size')! : undefined, building: Q.has('b'), centre: Q.has('b'), drop: Q.get('drop') ? new RegExp(Q.get('drop')!) : undefined, ground: Q.get('ground') ? +Q.get('ground')! : undefined, pick: Q.get('pick') ?? undefined });
 const ms = performance.now() - t0;
-for (const p of m.parts) scene.add(new THREE.Mesh(p.geo, p.mat));
+// &hi=<regex>: the parts whose material matches, bright green (to find a part: windows, a door…)
+const hi = Q.get('hi') ? new RegExp(Q.get('hi')!) : null;
+for (const p of m.parts) scene.add(new THREE.Mesh(p.geo, hi && hi.test(p.mat.name) ? new THREE.MeshBasicMaterial({ color: 0x00ff44 }) : p.mat));
 // the grid as a coloured sheet just over the deck
 const cv = document.createElement('canvas'); cv.width = m.nx; cv.height = m.nz;
 const cx = cv.getContext('2d')!, img = cx.createImageData(m.nx, m.nz);

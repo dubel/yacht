@@ -42,6 +42,9 @@ export interface StructureDef {
   building?: boolean;
   /** a house's own door leaves (left out, and where they hung taken for its doorways) */
   doorParts?: RegExp;
+  /** a house's way in, where it is known (in its frame after scaling and centring): the middle of the wall,
+   *  and which way is out */
+  doorAt?: { x: number; z: number; outX: number; outZ: number; width?: number };
 }
 
 /** a doorway found in a house's walls (in the model's frame): its middle on the floor, width, height, and
@@ -79,6 +82,8 @@ export interface Measured {
   walk: { minX: number; maxX: number; minZ: number; maxZ: number };
   /** a house's doorways (none: no way in) */
   doors: Doorway[];
+  /** a house's window panes, where it has glass (filled in by the town) */
+  panes?: THREE.Box3[];
 }
 
 /** take a loaded model apart (per material, transforms baked, scaled and turned) and measure it */
@@ -209,7 +214,9 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
       const hit = leavesMerged.find((m) => m.clone().expandByScalar(0.25).intersectsBox(b));
       if (hit) hit.union(b); else leavesMerged.push(b.clone());
     }
-    doors = leavesMerged.length ? leavesMerged.map((b) => doorFromLeaf(b, box)) : findDoorways(cell, height, hits, nx, nz, x0, z0, foot);
+    const D = def.doorAt;
+    doors = D ? [{ x: D.x, z: D.z, y: foot, width: D.width ?? 1.2, height: 2.2, outX: D.outX, outZ: D.outZ, depth: 0.9 }]
+      : leavesMerged.length ? leavesMerged.map((b) => doorFromLeaf(b, box)) : findDoorways(cell, height, hits, nx, nz, x0, z0, foot);
     if (!doors.length) { const d = frontDoor(cell, height, nx, nz, x0, z0, foot); if (d) doors.push(d); }
     // the way through each: floor, not wall — at the level of the floor just inside it (the ground, if the
     // house has no floor of its own there)
@@ -447,8 +454,9 @@ export function tame(mat: THREE.Material): void {
   const m = mat as THREE.MeshStandardMaterial;
   if (!m.isMeshStandardMaterial) return;
   const metal = /metal|iron|steel|anvil|nail|hinge/i.test(m.name);
-  m.metalness = metal ? Math.min(m.metalness, 0.6) : Math.min(m.metalness, 0.05);
-  m.roughness = Math.max(m.roughness, metal ? 0.45 : 0.6);
+  // (old iron, not chrome: hoops and hinges that mirror the sky read as glass from a few paces)
+  m.metalness = metal ? Math.min(m.metalness, 0.3) : Math.min(m.metalness, 0.05);
+  m.roughness = Math.max(m.roughness, 0.6);
   m.envMapIntensity = 0.5;
   // (see-through leaves, thatch, cloth: cut out rather than blended — blended, they sort badly among the rest)
   if (m.transparent && m.opacity >= 0.99) { m.transparent = false; m.depthWrite = true; m.alphaTest = Math.max(m.alphaTest, 0.5); }

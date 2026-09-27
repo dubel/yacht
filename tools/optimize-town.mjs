@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 // models the optimizer can't bring down (its mode: '' joins parts and may go sloppy; 'nosloppy,keep' keeps the
 // nodes, for a pack picked apart by name)
 const MODELS = {
-  tavern: ['medieval_tavern', 40000, 1024, ''],
+  // (gently: anything harder shreds its textures — the barrels by its door came out like broken mirrors)
+  tavern: ['medieval_tavern', 40000, 1024, 'nosloppy'],
   noble: ['middle_age_noble_house', 25000, 1024],
   smithy: ['medieval_blacksmith', 25000, 1024],
   woodhouse: ['game_ready_wooden_house', 12000, 512],
@@ -30,10 +31,12 @@ const MODELS = {
   lowpoly: ['low-poly_medieval_wooden_and_plaster_houses', 20000, 512],
   props: ['medieval_tavern_asset_pack', 8000, 512, 'nosloppy,keep'],
   feast: ['medieval_tavern_table', 8000, 512],
-  well: ['medieval_stone_well_-_game_prop', 6000, 512, ''],
+  // (a photogrammetry scan: its UVs in a thousand pieces — anything but gentle simplifying shreds its texture;
+  // it stops at ~174k, drawn only from close by)
+  well: ['medieval_stone_well_-_game_prop', 20000, 512, 'nosloppy'],
   stall: ['medieval_market_stall', 10000, 512],
   stall2: ['medieval_stall', 8000, 512],
-  butcher: ['the_butchers_table', 6000, 512, ''],
+  butcher: ['the_butchers_table', 40000, 512, 'nosloppy'],
   tools: ['blacksmithing_tools.', 6000, 512],
 };
 const tris = (p) => {
@@ -50,7 +53,7 @@ for (const [name, [src, budget, tex, hard]] of Object.entries(MODELS)) {
   let inp = orig;
   if (hard !== undefined) {
     inp = `${tmpdir()}/town-${name}.glb`;
-    execFileSync('node', ['tools/simplify-hard.mjs', orig, inp, String(budget), ...(hard ? [hard, hard.includes('keep') ? '0.1' : '0.08'] : [])], { stdio: 'pipe' });
+    execFileSync('node', ['tools/simplify-hard.mjs', orig, inp, String(budget), ...(hard ? [hard, hard.includes('keep') ? '0.1' : hard.includes('nosloppy') ? '0.02' : '0.08'] : [])], { stdio: 'pipe' });
   }
   const t = tris(orig), ratio = hard !== undefined ? 1 : Math.min(1, budget / tris(inp));
   const base = ['gltf-transform', 'optimize', inp, out, '--texture-compress', 'webp', '--texture-size', String(tex), '--compress', 'meshopt',
