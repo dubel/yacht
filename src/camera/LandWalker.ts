@@ -92,7 +92,7 @@ export class LandWalker {
     if (g < -WADE) { this.onDeep?.(); return false; }
     const here = this.floor(this.pos.x, this.pos.y), run = Math.hypot(x - this.pos.x, z - this.pos.y);
     // uphill only where it isn't too steep (down, anything); boards: a step up, as onto a pier or a stair
-    const step = this.floorAt?.(x, z) != null ? 0.3 : 0;
+    const step = this.floorAt?.(x, z) != null ? 0.55 : 0;
     return g - here <= Math.max(CLIMB * run, step) + 1e-4;
   }
 

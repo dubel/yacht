@@ -26,6 +26,7 @@ export class Hud {
       'działa: <kbd>Ctrl</kbd> lewy / prawy — salwa z lewej / prawej burty; na pokładzie <kbd>Ctrl</kbd> przy dziale — obsadź',
       '<kbd>1</kbd>–<kbd>9</kbd> to, co leży w slotach (broń, latarnie, rum, luneta) — <kbd>Ctrl</kbd> / lewy przycisk: strzał / cięcie / unieś latarnię / łyk &nbsp; <kbd>I</kbd> ekwipunek',
       '<kbd>Z</kbd> rzuć / podnieś kotwicę (przy brzegu, 3–28 m wody) &nbsp; na kotwicy: <kbd>B</kbd> szalupą na ląd i z powrotem',
+      '<kbd>E</kbd> akcja na lądzie: otwórz / zamknij drzwi (w Tortudze: <kbd>B</kbd> przy kei — zejście ze statku i powrót)',
       'na mieliźnie: <kbd>K</kbd> — wywieźć kotwicę i ściągnąć statek (kedżowanie)',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
       '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×12',

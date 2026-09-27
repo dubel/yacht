@@ -430,7 +430,9 @@ export class Game {
       comeAboard: () => this.setOnDeck(true),
     });
     this.land.blocked = (x, z) => this.skull.blocked(x, z) || this.tortuga.blocked(x, z) || this.town.blocked(x, z);
-    this.land.floorAt = (x, z) => this.tortuga.floorAt(x, z);
+    this.land.floorAt = (x, z) => this.tortuga.floorAt(x, z) ?? this.town.floorAt(x, z);
+    this.town.onDoor = (opening, x, z) => { const h = this.heardFrom(x, z); this.audio.door(opening, h.pan, h.d); };
+    this.town.onShut = (x, z) => { const h = this.heardFrom(x, z); this.audio.doorShut(h.pan, h.d); };
     this.physics.fenders = (x, z) => this.tortuga.push(x, z);
     this.dolphins.solid = (x, z) => this.tortuga.push(x, z) !== null;
     await Promise.all([this.landing.load('assets/boats/jollyboat.glb'), this.tortuga.load()]);
@@ -623,6 +625,8 @@ export class Game {
     this.anchor.update(stepDt, this.input.wasPressed('KeyZ') && !this.ashore, this.wind.speed, this.kedge.state !== 'afloat');
     // (at Tortuga the ship goes alongside a pier and B takes him straight ashore: no jolly boat)
     this.town.update(this.cam.camera.position, body.origin);
+    this.town.tick(stepDt);
+    if (!this.ashore) this.actionHint.hidden = true;
     const bKey = this.input.wasPressed('KeyB') && !this.map.open;
     const info = this.boat.info;
     const quay = !this.landing.ashore && this.tortuga.update(stepDt,
@@ -716,6 +720,14 @@ export class Game {
         this.land.magnification = sg.magnification;
         this.land.tremor = sg.tremor();
         this.land.update(dt, this.input, this.cam.camera);
+        // E, the action key: what is within reach in front of him (a door, for now)
+        {
+          const dir = new THREE.Vector2(Math.sin(this.land.yaw), Math.cos(this.land.yaw));
+          const busy = this.map.open || this.chest.open || sg.raise > 0.3;
+          const what = busy ? null : this.town.interact(this.land.pos, dir, this.input.wasPressed('KeyE'));
+          this.actionHint.hidden = !what;
+          if (what) this.actionHint.innerHTML = what.startsWith('Odsuń') ? what : `<kbd>E</kbd> — ${what}`;
+        }
         const L = this.env.light;
         this.weapons.update(dt, this.input, this.cam.camera, this.land.stride, sg.raise > 0.08 || this.map.open || this.chest.open || this.vomit.active,
           this.env.lightDir, L.color, L.intensity, this.scene.environment);
@@ -847,6 +859,16 @@ export class Game {
     try { localStorage.setItem('lagoon.fauna', on ? 'on' : 'off'); } catch { /* storage unavailable */ }
     if (!quiet) this.messages.say(on ? 'Fauna włączona (F9)' : 'Fauna wyłączona (F9)', 2.5);
   }
+
+  /** what the action key (E) would do just now */
+  private readonly actionHint = (() => {
+    const el = document.createElement('div');
+    el.className = 'landhint';
+    el.style.bottom = '124px';
+    el.hidden = true;
+    document.body.append(el);
+    return el;
+  })();
 
   private readonly gunHint = (() => {
     const el = document.createElement('div');

@@ -216,6 +216,21 @@ export class AudioSystem {
     playFootstep(ctx, this.muffle, this.noise, ctx.currentTime + 0.005, { pace, weight, pan: this.foot * 0.12, motion: Math.min(1, this.motion * 8) });
   }
 
+  /** a door swung open or pushed to: its hinges creak (the recorded creak of old wood, pitched to a door) */
+  door(opening: boolean, pan: number, distance: number): void {
+    if (!this.ctx) return;
+    const near = Math.min(1, 6 / (distance + 2));
+    this.play('creak-1', (opening ? 0.55 : 0.4) * near, { pan: pan * 0.7, rate: (opening ? 1.15 : 1.4) + Math.random() * 0.15, lowpass: 2500 + 9000 * near });
+  }
+
+  /** a door coming to against its frame: a dull knock of wood on wood */
+  doorShut(pan: number, distance: number): void {
+    const ctx = this.ctx;
+    if (!ctx) return;
+    const near = Math.min(1, 6 / (distance + 2));
+    playGroundStep(ctx, this.muffle, this.noise, ctx.currentTime + 0.005, { pace: 0, weight: 2.6 * near, pan: pan * 0.7, ground: 'grass' });
+  }
+
   /** a footfall ashore: in sand, in grass, or wading (a slosh, deeper the more water) */
   groundStep(pace: number, ground: 'sand' | 'grass' | 'water' | 'wood', weight = 1, wade = 0): void {
     const ctx = this.ctx;

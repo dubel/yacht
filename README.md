@@ -19,6 +19,7 @@ Wymaga WebGL2 z `EXT_color_buffer_float` (każdy współczesny desktop, większo
 | --- | --- |
 | `A` / `D` (strzałki) | ster |
 | `W` / `S` (lub `Q` / `E`) | wybieranie / luzowanie szotów (wyłącza auto-trym) |
+| `E` (na lądzie) | akcja: otwórz / zamknij drzwi, gdy stoisz przed nimi |
 | `T` | auto-trym żagli |
 | `Spacja` | postaw / zwiń żagle |
 | mysz (przeciąganie), kółko | obrót kamery (także pod wodę), zoom |

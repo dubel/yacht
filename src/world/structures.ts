@@ -33,8 +33,31 @@ export interface StructureDef {
    *  point) at y = 0 */
   centre?: boolean;
   ground?: number;
-  /** a building, not a deck: all of it in the way (nothing to walk on), its walls and all */
+  /** a thing standing about (a barrel, a stall): all of it in the way, nothing to walk on */
   solid?: boolean;
+  /**
+   * A house: its walls in the way, its floors to walk on, and its doorways found (gaps in the walls between
+   * the inside and out, for doors to be hung in). A house with no way in is left solid.
+   */
+  building?: boolean;
+  /** a house's own door leaves (left out, and where they hung taken for its doorways) */
+  doorParts?: RegExp;
+}
+
+/** a doorway found in a house's walls (in the model's frame): its middle on the floor, width, height, and
+ *  which way is out (a unit vector across the wall) */
+export interface Doorway {
+  x: number;
+  z: number;
+  y: number;
+  width: number;
+  height: number;
+  outX: number;
+  outZ: number;
+  /** how thick the wall is there (m): the hole cut through it spans this */
+  depth: number;
+  /** where the house's own door hung (its sill as it was: stepped up to), rather than a doorway made */
+  own?: boolean;
 }
 
 export interface Measured {
@@ -54,6 +77,8 @@ export interface Measured {
   outZ: Float32Array;
   /** how far the boards go (m, in the model's frame): the first and last column/row with a run of them */
   walk: { minX: number; maxX: number; minZ: number; maxZ: number };
+  /** a house's doorways (none: no way in) */
+  doors: Doorway[];
 }
 
 /** take a loaded model apart (per material, transforms baked, scaled and turned) and measure it */
@@ -62,12 +87,13 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   // (one model out of a pack: that node alone, where it stands in the file)
   const from = def.pick ? root.getObjectByName(def.pick) : root;
   if (!from) throw new Error(`structure ${def.url}: no node "${def.pick}"`);
-  const meshes: THREE.Mesh[] = [];
+  const meshes: THREE.Mesh[] = [], leaves: THREE.Mesh[] = [];
+  const named = (m: THREE.Mesh, re: RegExp) => { const mat = Array.isArray(m.material) ? m.material[0] : m.material; return re.test(m.name) || re.test(m.parent?.name ?? '') || re.test(mat.name); };
   from.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    const mat = Array.isArray(m.material) ? m.material[0] : m.material;
-    if (def.drop && (def.drop.test(m.name) || def.drop.test(m.parent?.name ?? '') || def.drop.test(mat.name))) return;
+    if (def.drop && named(m, def.drop)) return;
+    if (def.doorParts && named(m, def.doorParts)) { leaves.push(m); return; }
     meshes.push(m);
   });
   // (a part repeated through the model — beams, posts — may come as one mesh drawn many times over: each copy
@@ -88,10 +114,13 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   }
   const frame = new THREE.Matrix4().makeRotationY(def.turn).multiply(new THREE.Matrix4().makeScale(scale, scale, scale));
   const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  // (a house's materials its own: the holes cut for its doors are cut in them alone)
+  const own = new Map<THREE.Material, THREE.Material>();
   for (const m of meshes) {
     const mats = Array.isArray(m.material) ? m.material : [m.material];
     // (one material per mesh in these models; a multi-material mesh keeps its first)
-    const mat = mats[0];
+    let mat = mats[0];
+    if (def.building) { if (!own.has(mat)) own.set(mat, mat.clone()); mat = own.get(mat)!; }
     if (!byMat.has(mat)) byMat.set(mat, []);
     const base = floats(m.geometry);
     for (const w of copies(m)) byMat.get(mat)!.push(base.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(frame, w)));
@@ -110,10 +139,13 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   //  sample put in the cell under it with its height and how level the surface is)
   let box = new THREE.Box3();
   for (const p of parts) { p.geo.computeBoundingBox(); box.union(p.geo.boundingBox!); }
+  // the door leaves' boxes, in the same frame (and shifted with it below)
+  const leafBoxes = leaves.map((m) => { m.geometry.computeBoundingBox(); const b = new THREE.Box3(); for (const w of copies(m)) b.union(m.geometry.boundingBox!.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(frame, w))); return b; });
   if (def.centre) {
     // its middle over the origin, its foot on y = 0
     const c = box.getCenter(new THREE.Vector3()), foot = def.ground !== undefined ? def.ground * scale : box.min.y;
     for (const p of parts) { p.geo.translate(-c.x, -foot, -c.z); p.geo.computeBoundingSphere(); }
+    for (const b of leafBoxes) b.translate(new THREE.Vector3(-c.x, -foot, -c.z));
     box = new THREE.Box3();
     for (const p of parts) { p.geo.computeBoundingBox(); box.union(p.geo.boundingBox!); }
   }
@@ -149,7 +181,63 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   // refine: the mean of the surfaces within 5 cm of it
   { let s = 0, c = 0; for (const hs of hits) for (const h of hs) if (h.up > 0.92 && Math.abs(h.y - deck) < 0.06) { s += h.y; c++; } if (c) deck = s / c; }
   const cell = new Uint8Array(nx * nz), height = new Float32Array(nx * nz);
-  if (def.solid) {
+  let doors: Doorway[] = [];
+  if (def.building) {
+    // a house: in each cell, the lowest floor with a man's headroom over it — a floor in the model (a
+    // raised one, the treads of a stair) or else the ground itself; none, and it is a wall, a post, a bed
+    const foot = box.min.y;
+    hits.forEach((hs, k) => {
+      // (the lowest first: under a porch roof he walks on the ground, not on the roof; an upper floor is out
+      // of reach for now)
+      const cands = [foot, ...hs.filter((h) => h.up > 0.7 && h.y > foot - 0.3 && h.y < foot + 2.6).map((h) => h.y).sort((p, q) => p - q)];
+      for (const c of cands) {
+        let over = Infinity;
+        for (let m = hs.length - 1; m >= 0; m--) if (hs[m].y > c + 0.06) { over = hs[m].y - c; break; }
+        if (over < HEADROOM) continue;
+        // (on the ground itself: nothing of the model underfoot — the terrain carries him)
+        if (c === foot && !hs.some((h) => Math.abs(h.y - foot) < 0.06)) cell[k] = Cell.Empty;
+        else { cell[k] = Cell.Walk; height[k] = c; }
+        return;
+      }
+      cell[k] = Cell.Block;
+    });
+    // its doorways: where its own doors hung; else gaps found in its walls; else one made in the middle of
+    // its front (+z: the side turned to the road)
+    // (a leaf's parts — the boards, its handle, its ironwork — are one door: boxes that touch are merged)
+    const leavesMerged: THREE.Box3[] = [];
+    for (const b of leafBoxes) {
+      const hit = leavesMerged.find((m) => m.clone().expandByScalar(0.25).intersectsBox(b));
+      if (hit) hit.union(b); else leavesMerged.push(b.clone());
+    }
+    doors = leavesMerged.length ? leavesMerged.map((b) => doorFromLeaf(b, box)) : findDoorways(cell, height, hits, nx, nz, x0, z0, foot);
+    if (!doors.length) { const d = frontDoor(cell, height, nx, nz, x0, z0, foot); if (d) doors.push(d); }
+    // the way through each: floor, not wall — at the level of the floor just inside it (the ground, if the
+    // house has no floor of its own there)
+    const before = cell.slice(), beforeH = height.slice();
+    const at = (x: number, z: number) => { const i = Math.floor((x - x0) / GRID), j = Math.floor((z - z0) / GRID); return i < 0 || j < 0 || i >= nx || j >= nz ? -1 : j * nx + i; };
+    for (const d of doors) {
+      const hw = d.width / 2 - 0.05, reach = d.depth / 2 + 0.4;
+      let inner = foot;
+      for (let t = d.depth / 2 + 0.3; t < d.depth / 2 + 2; t += GRID) {
+        const k = at(d.x - d.outX * t, d.z - d.outZ * t);
+        if (k < 0 || before[k] === Cell.Block) continue;
+        inner = before[k] === Cell.Walk ? beforeH[k] : foot;
+        break;
+      }
+      // (the house's own doorway keeps its sill, up its steps; one made opens on the floor inside)
+      if (!d.own) d.y = inner;
+      const sill = d.y;
+      for (let j = 0; j < nz; j++)
+        for (let i = 0; i < nx; i++) {
+          const x = x0 + (i + 0.5) * GRID - d.x, z = z0 + (j + 0.5) * GRID - d.z;
+          const across = x * d.outX + z * d.outZ, along = Math.abs(x * d.outZ - z * d.outX);
+          if (along > hw || Math.abs(across) > reach) continue;
+          const k = j * nx + i;
+          if (sill - foot < 0.08) cell[k] = Cell.Empty; else { cell[k] = Cell.Walk; height[k] = sill; }
+        }
+    }
+    if (!doors.length) fillInside(cell, nx, nz);
+  } else if (def.solid) {
     // a building: whatever stands above its foot is in the way (a threshold, a paving stone underfoot is not)
     hits.forEach((hs, k) => { if (hs.some((h) => h.y > box.min.y + 0.25)) cell[k] = Cell.Block; });
     // (its inside too: a closed ring of walls round empty floor)
@@ -234,7 +322,7 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) if (cell[j * nx + i] === Cell.Walk) { cols[i]++; rows[j]++; }
   const first = (a: Int32Array) => Math.max(0, a.findIndex((v) => v >= 4)), last = (a: Int32Array) => { for (let k = a.length - 1; k >= 0; k--) if (a[k] >= 4) return k; return a.length - 1; };
   const walk = { minX: x0 + first(cols) * GRID, maxX: x0 + (last(cols) + 1) * GRID, minZ: z0 + first(rows) * GRID, maxZ: z0 + (last(rows) + 1) * GRID };
-  return { parts, box, deck, x0, z0, nx, nz, cell, height, outX, outZ, walk };
+  return { parts, box, deck, x0, z0, nx, nz, cell, height, outX, outZ, walk, doors };
 }
 
 /** a copy with plain float attributes (quantised ones would clip when transformed) and no index */
@@ -367,4 +455,138 @@ export function tame(mat: THREE.Material): void {
   // (a metal-roughness texture would bring back the metal the numbers took away)
   if (!metal) m.metalnessMap = null;
   m.needsUpdate = true;
+}
+
+/**
+ * The doorways of a house: gaps in its walls, a door's width, with the inside on one side and the outside on
+ * the other. The walls are the grid's Block cells; the inside is what they enclose (found with the walls
+ * thickened a little, so the gaps themselves don't let the outside in).
+ */
+function findDoorways(cell: Uint8Array, height: Float32Array, hits: { y: number; up: number }[][], nx: number, nz: number, x0: number, z0: number, foot: number): Doorway[] {
+  const R = 3, N = nx * nz;
+  const wall = (i: number, j: number) => i >= 0 && j >= 0 && i < nx && j < nz && cell[j * nx + i] === Cell.Block;
+  // the walls thickened; what the outside reaches round them; the rest, not wall: the inside
+  const thick = new Uint8Array(N);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) if (wall(i, j))
+    for (let b = Math.max(0, j - R); b <= Math.min(nz - 1, j + R); b++) for (let a = Math.max(0, i - R); a <= Math.min(nx - 1, i + R); a++) thick[b * nx + a] = 1;
+  const flood = (open: (k: number) => boolean): Uint8Array => {
+    const seen = new Uint8Array(N), q: number[] = [];
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) if ((i === 0 || j === 0 || i === nx - 1 || j === nz - 1) && open(j * nx + i)) { seen[j * nx + i] = 1; q.push(j * nx + i); }
+    while (q.length) {
+      const k = q.pop()!, i = k % nx, j = (k - i) / nx;
+      for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+        if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+        const n = b * nx + a;
+        if (!seen[n] && open(n)) { seen[n] = 1; q.push(n); }
+      }
+    }
+    return seen;
+  };
+  const outside = flood((k) => !thick[k]);
+  const inside = new Uint8Array(N);
+  let insideCount = 0;
+  for (let k = 0; k < N; k++) if (!thick[k] && !outside[k]) { inside[k] = 1; insideCount++; }
+  // (a room a man can stand in, at least)
+  if (insideCount < 30) return [];
+  // does the true outside (walls not thickened) get in at all?
+  const reach = flood((k) => cell[k] !== Cell.Block);
+  let open = false;
+  for (let k = 0; k < N; k++) if (inside[k] && reach[k]) { open = true; break; }
+  if (!open) return [];
+  // the gap cells: between two ends of wall along one axis (a door's width apart at most), with the inside a
+  // few cells one way across it and the outside the other way
+  const gap = new Int8Array(N); // 0 none; ±1: across is +z/−z out (wall along x); ±2: across is +x/−x out
+  const MAXW = 8, LOOK = 7;
+  for (let j = 0; j < nz; j++)
+    for (let i = 0; i < nx; i++) {
+      const k = j * nx + i;
+      if (cell[k] === Cell.Block || !reach[k]) continue;
+      for (const along of [0, 1]) {
+        const di = along === 0 ? 1 : 0, dj = along === 0 ? 0 : 1;
+        let a = 1, b = 1;
+        while (a <= MAXW && !wall(i - di * a, j - dj * a)) a++;
+        while (b <= MAXW && !wall(i + di * b, j + dj * b)) b++;
+        if (a > MAXW || b > MAXW || a + b - 1 > MAXW || a + b - 1 < 3) continue;
+        // across it: the inside one way, the outside the other
+        const ci = dj, cj = di;
+        const sideIs = (s: number, what: Uint8Array) => { for (let t = 1; t <= LOOK; t++) { const ii = i + ci * s * t, jj = j + cj * s * t; if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) return what === outside; if (what[jj * nx + ii]) return true; } return false; };
+        const code = along === 0 ? 1 : 2;
+        if (sideIs(1, inside) && sideIs(-1, outside)) gap[k] = -code as -1 | -2;
+        else if (sideIs(-1, inside) && sideIs(1, outside)) gap[k] = code as 1 | 2;
+      }
+    }
+  // each run of gap cells: one doorway
+  const seen = new Uint8Array(N), out: Doorway[] = [];
+  for (let k0 = 0; k0 < N; k0++) {
+    if (!gap[k0] || seen[k0]) continue;
+    const code = gap[k0], q = [k0], group: number[] = [];
+    seen[k0] = 1;
+    while (q.length) {
+      const k = q.pop()!, i = k % nx, j = (k - i) / nx;
+      group.push(k);
+      for (let b = -1; b <= 1; b++) for (let a = -1; a <= 1; a++) {
+        const ii = i + a, jj = j + b;
+        if (ii < 0 || jj < 0 || ii >= nx || jj >= nz) continue;
+        const n = jj * nx + ii;
+        if (!seen[n] && gap[n] === code) { seen[n] = 1; q.push(n); }
+      }
+    }
+    if (group.length < 3) continue;
+    const alongX = Math.abs(code) === 1;
+    let si = Infinity, ai = -Infinity, sj = Infinity, aj = -Infinity;
+    for (const k of group) { const i = k % nx, j = (k - i) / nx; si = Math.min(si, i); ai = Math.max(ai, i); sj = Math.min(sj, j); aj = Math.max(aj, j); }
+    const width = ((alongX ? ai - si : aj - sj) + 1) * GRID;
+    if (width < 0.6) continue;
+    // its floor, and its lintel: the lowest thing over the gap above head height
+    let floor = foot, top = Infinity;
+    for (const k of group) {
+      if (cell[k] === Cell.Walk) floor = Math.max(floor, height[k]);
+      for (const h of hits[k]) if (h.y > floor + 1.5) top = Math.min(top, h.y);
+    }
+    const outSign = code > 0 ? 1 : -1;
+    // (the doorway's line: the middle of its run across the wall)
+    out.push({
+      x: x0 + ((si + ai) / 2 + 0.5) * GRID, z: z0 + ((sj + aj) / 2 + 0.5) * GRID, y: floor,
+      width, height: Math.min(2.3, Math.max(1.8, (top === Infinity ? floor + 2.1 : top) - floor)),
+      outX: alongX ? 0 : outSign, outZ: alongX ? outSign : 0, depth: ((alongX ? aj - sj : ai - si) + 1) * GRID + 0.2,
+    });
+  }
+  // (doorways run into each other along a thick wall: one door each, the widest)
+  return out.filter((d, i) => !out.some((e, j) => j !== i && Math.hypot(e.x - d.x, e.z - d.z) < 1.2 && (e.width > d.width || (e.width === d.width && j < i))));
+}
+
+/** a doorway where a door leaf hung: its box (thin across the wall) gives the width, height and the wall */
+function doorFromLeaf(b: THREE.Box3, house: THREE.Box3): Doorway {
+  const sx = b.max.x - b.min.x, sz = b.max.z - b.min.z;
+  const c = b.getCenter(new THREE.Vector3()), hc = house.getCenter(new THREE.Vector3());
+  // (the leaf lies along the wall: the thin way across is out, away from the middle of the house)
+  const acrossX = sx < sz;
+  const out = acrossX ? Math.sign(c.x - hc.x) || 1 : Math.sign(c.z - hc.z) || 1;
+  return {
+    x: c.x, z: c.z, y: b.min.y, width: Math.min(1.6, Math.max(0.8, acrossX ? sz : sx)), height: Math.min(2.4, Math.max(1.8, b.max.y - b.min.y)),
+    outX: acrossX ? out : 0, outZ: acrossX ? 0 : out, depth: 0.6, own: true,
+  };
+}
+
+/**
+ * A doorway made where the house has none: in the middle of its front (+z), where the wall is — the first
+ * run of wall cells coming in from outside at the middle — a man's width.
+ */
+function frontDoor(cell: Uint8Array, height: Float32Array, nx: number, nz: number, x0: number, z0: number, foot: number): Doorway | null {
+  // (the middle column, and a little either side of it if the middle has a post in it)
+  for (const off of [0, 2, -2, 4, -4, 6, -6]) {
+    const i = Math.floor(nx / 2) + off;
+    let outer = -1;
+    for (let j = nz - 1; j >= 0; j--) if (cell[j * nx + i] === Cell.Block) { outer = j; break; }
+    if (outer < 0) continue;
+    let inner = outer;
+    while (inner > 0 && cell[(inner - 1) * nx + i] === Cell.Block) inner--;
+    // (a wall, not the whole depth of a solid thing)
+    if (outer - inner > 6 || inner === 0) continue;
+    // the floor inside, behind it
+    const k = Math.max(0, inner - 2) * nx + i;
+    const y = cell[k] === Cell.Walk ? height[k] : foot;
+    return { x: x0 + (i + 0.5) * GRID, z: z0 + ((inner + outer) / 2 + 0.5) * GRID, y, width: 1.1, height: 2.1, outX: 0, outZ: 1, depth: (outer - inner + 1) * GRID + 0.1 };
+  }
+  return null;
 }
