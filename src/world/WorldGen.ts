@@ -225,6 +225,42 @@ export const TORTUGA: Island = {
 };
 /** the quay line (world x) and its ends (world z) */
 export const TORTUGA_QUAY = { x: TORTUGA.x + TORTUGA.harbour!.x, z0: TORTUGA.z - TORTUGA.harbour!.half, z1: TORTUGA.z + TORTUGA.harbour!.half, land: TORTUGA.harbour!.land };
+/**
+ * Tortuga's town, behind the quay, in its own frame: u metres inland from the quay line (west), v along it
+ * (world z; north is −v). One sandy main road runs parallel to the quay; the market square opens off it in the
+ * middle; narrow lanes lead from the road back between the houses to the second row by the trees. The ground
+ * there is trodden, darker sand (terrainColor); TortugaTown builds the houses round it.
+ */
+export const TORTUGA_TOWN = {
+  road: { u: 10.25, half: 2.25 },
+  square: { u0: 12, u1: 40, v0: -15, v1: 15 },
+  lanes: [-140, -95, -52, 50, 96, 140],
+  laneHalf: 1.3,
+  /** how far inland the town reaches (the trees beyond) */
+  depth: 58,
+};
+
+/** how trodden the ground is at (x, z) in Tortuga's town: 0 untouched … 1 the road, the square */
+export function tortugaTrodden(x: number, z: number): number {
+  const Q = TORTUGA_QUAY, T = TORTUGA_TOWN;
+  const u = Q.x - x, v = z;
+  if (u < -1 || u > T.depth + 4 || v < Q.z0 - 20 || v > Q.z1 + 20) return 0;
+  // (the edges ragged: nobody laid them out)
+  const wob = 0.8 * (fbm(x / 7, z / 7, 2) - 0.5);
+  const along = smoothstep(Q.z1 + 18, Q.z1 + 4, Math.abs(v - (Q.z0 + Q.z1) / 2));
+  let w = 0;
+  // the road, and the quayside in front of it, walked less
+  w = Math.max(w, smoothstep(T.road.half + 0.8, T.road.half - 0.6, Math.abs(u - T.road.u) + wob) * along);
+  w = Math.max(w, 0.45 * smoothstep(8.5, 6.5, u + wob) * smoothstep(-1, 1, u) * along);
+  // the square
+  const S = T.square;
+  const sq = Math.min(smoothstep(S.u0 - 1, S.u0 + 1, u + wob), smoothstep(S.u1 + 1, S.u1 - 1, u + wob), smoothstep(S.v0 - 1, S.v0 + 1, v + wob), smoothstep(S.v1 + 1, S.v1 - 1, v + wob));
+  w = Math.max(w, sq);
+  // the lanes back to the second row
+  for (const l of T.lanes) w = Math.max(w, 0.85 * smoothstep(T.laneHalf + 0.6, T.laneHalf - 0.5, Math.abs(v - l) + wob) * smoothstep(T.depth, T.depth - 4, u) * smoothstep(T.road.u, T.road.u + 2, u));
+  return w;
+}
+
 const TORTUGA_FEATURE: Feature = { kind: 'island', isl: TORTUGA, reach: islandReach(TORTUGA), name: 'Tortuga', tortuga: true };
 
 /**
@@ -409,14 +445,21 @@ const mix3 = (o: number[], b: readonly number[], t: number) => { o[0] += (b[0] -
 const set3 = (o: number[], a: readonly number[], k = 1) => { o[0] = a[0] * k; o[1] = a[1] * k; o[2] = a[2] * k; };
 const scale3 = (o: number[], k: number) => { o[0] *= k; o[1] *= k; o[2] *= k; };
 
-/** linear RGB of the ground at (x, z) with height h and normal-y ny, written to out[0..2] */
 const DIRT = C(0.33, 0.25, 0.17);
+/** Tortuga's trodden sand: darker, browner than the beach, packed hard by boots and barrows */
+const TRODDEN = C(0.55, 0.45, 0.32);
 
+/** linear RGB of the ground at (x, z) with height h and normal-y ny, written to out[0..2] */
 export function terrainColor(x: number, z: number, h: number, ny: number, out: number[]): void {
   terrainColorBase(x, z, h, ny, out);
   // the Skull Island's plateau: bare, trodden earth round the rocks
   const d = Math.hypot(x - SKULL_ISLAND.x, z - SKULL_ISLAND.z), r = SKULL_ISLAND.flat!.r;
   if (d < r * 1.3 && h > 0.5) mix3(out, DIRT, smoothstep(r * 1.3, r * 0.9, d) * (0.8 + 0.2 * fbm(x / 6, z / 6, 2)));
+  // Tortuga's road, square and lanes: sand trodden hard and dark, mud in the ruts
+  if (h > 1.2) {
+    const t = tortugaTrodden(x, z);
+    if (t > 0) mix3(out, TRODDEN, t * (0.75 + 0.25 * fbm(x / 3, z / 3, 2)));
+  }
 }
 
 function terrainColorBase(x: number, z: number, h: number, ny: number, out: number[]): void {

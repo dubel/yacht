@@ -46,6 +46,7 @@ import { Vomit } from '../fpv/Vomit';
 import { OFF } from '../boat/DeckMap';
 import { SkullIsland } from '../world/SkullIsland';
 import { Tortuga } from '../world/Tortuga';
+import { TortugaTown } from '../world/TortugaTown';
 import { resetWorldState } from '../gameplay/worldState';
 import { SKULL_ISLAND } from '../world/WorldGen';
 import type { Weapon } from '../fpv/Weapons';
@@ -116,6 +117,8 @@ export class Game {
   landing!: Landing;
   /** Tortuga's waterfront: its piers, and going ashore there straight from the ship */
   tortuga!: Tortuga;
+  /** Tortuga's town behind the quay (fetched when the ship comes near) */
+  readonly town = new TortugaTown();
   get ashore(): boolean { return (this.landing?.ashore ?? false) || (this.tortuga?.ashore ?? false); }
   /** first person: on deck or ashore */
   get fpv(): boolean { return this.onDeck || this.ashore; }
@@ -426,12 +429,14 @@ export class Game {
       goAshore: (stand, yaw) => this.goAshore(stand, yaw),
       comeAboard: () => this.setOnDeck(true),
     });
-    this.land.blocked = (x, z) => this.skull.blocked(x, z) || this.tortuga.blocked(x, z);
+    this.land.blocked = (x, z) => this.skull.blocked(x, z) || this.tortuga.blocked(x, z) || this.town.blocked(x, z);
     this.land.floorAt = (x, z) => this.tortuga.floorAt(x, z);
     this.physics.fenders = (x, z) => this.tortuga.push(x, z);
     this.dolphins.solid = (x, z) => this.tortuga.push(x, z) !== null;
     await Promise.all([this.landing.load('assets/boats/jollyboat.glb'), this.tortuga.load()]);
-    this.scene.add(this.tortuga.group);
+    this.scene.add(this.tortuga.group, this.town.group);
+    // (starting in the harbour: the town up before the first frame)
+    if (Config.location?.startsWith('tortuga')) await this.town.loadNow();
     this.scene.add(this.landing.group);
     this.leadsman.onCall = (c) => this.audio.bell(c.level);
     this.scene.add(this.fish.mesh, this.gulls.mesh);
@@ -617,6 +622,7 @@ export class Game {
     this.kedge.update(stepDt, t, this.input.wasPressed('KeyK'), this.waves);
     this.anchor.update(stepDt, this.input.wasPressed('KeyZ') && !this.ashore, this.wind.speed, this.kedge.state !== 'afloat');
     // (at Tortuga the ship goes alongside a pier and B takes him straight ashore: no jolly boat)
+    this.town.update(this.cam.camera.position, body.origin);
     const bKey = this.input.wasPressed('KeyB') && !this.map.open;
     const info = this.boat.info;
     const quay = !this.landing.ashore && this.tortuga.update(stepDt,

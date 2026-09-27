@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { fadeThrough } from '../gameplay/fade';
-import { Cell, measure, Placed, type Measured, type StructureDef } from './structures';
+import { Cell, measure, Placed, tame, type Measured, type StructureDef } from './structures';
 import { TORTUGA_QUAY, terrainHeight } from './WorldGen';
 
 /*
@@ -141,6 +141,7 @@ export class Tortuga {
       const mats = mine.map((a) => new THREE.Matrix4().compose(new THREE.Vector3(a.x, y, a.z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), a.turn), new THREE.Vector3(1, 1, 1)));
       for (const p of m.parts) {
         if (name === 'wharf') (p.mat as THREE.MeshStandardMaterial).color.multiply(WHARF_TINT);
+        tame(p.mat);
         const mesh = new THREE.InstancedMesh(p.geo, p.mat, mine.length);
         mats.forEach((mt, k) => mesh.setMatrixAt(k, mt));
         mesh.computeBoundingSphere();

@@ -23,6 +23,18 @@ export interface StructureDef {
   /** scale, turn about the vertical (rad), applied before measuring */
   scale: number;
   turn: number;
+  /** instead of `scale`: the size (m) its longest side across the ground is to have */
+  size?: number;
+  /** only this node of the file (a pack of several models: one of them) */
+  pick?: string;
+  /** parts left out (a ground plate, a base, grass): matched against mesh, node and material names */
+  drop?: RegExp;
+  /** set on its own ground: its middle over the origin, its foot (`ground`, in the file's units, or its lowest
+   *  point) at y = 0 */
+  centre?: boolean;
+  ground?: number;
+  /** a building, not a deck: all of it in the way (nothing to walk on), its walls and all */
+  solid?: boolean;
 }
 
 export interface Measured {
@@ -46,19 +58,44 @@ export interface Measured {
 
 /** take a loaded model apart (per material, transforms baked, scaled and turned) and measure it */
 export function measure(root: THREE.Object3D, def: StructureDef): Measured {
-  const frame = new THREE.Matrix4().makeRotationY(def.turn).multiply(new THREE.Matrix4().makeScale(def.scale, def.scale, def.scale));
   root.updateMatrixWorld(true);
-  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
-  root.traverse((o) => {
+  // (one model out of a pack: that node alone, where it stands in the file)
+  const from = def.pick ? root.getObjectByName(def.pick) : root;
+  if (!from) throw new Error(`structure ${def.url}: no node "${def.pick}"`);
+  const meshes: THREE.Mesh[] = [];
+  from.traverse((o) => {
     const m = o as THREE.Mesh;
     if (!m.isMesh) return;
-    const g = floats(m.geometry).applyMatrix4(new THREE.Matrix4().multiplyMatrices(frame, m.matrixWorld));
+    const mat = Array.isArray(m.material) ? m.material[0] : m.material;
+    if (def.drop && (def.drop.test(m.name) || def.drop.test(m.parent?.name ?? '') || def.drop.test(mat.name))) return;
+    meshes.push(m);
+  });
+  // (a part repeated through the model — beams, posts — may come as one mesh drawn many times over: each copy
+  // where it stands)
+  const copies = (m: THREE.Mesh): THREE.Matrix4[] => {
+    const im = m as THREE.InstancedMesh;
+    if (!im.isInstancedMesh) return [m.matrixWorld];
+    const out: THREE.Matrix4[] = [], t = new THREE.Matrix4();
+    for (let i = 0; i < im.count; i++) { im.getMatrixAt(i, t); out.push(m.matrixWorld.clone().multiply(t)); }
+    return out;
+  };
+  // the scale: as given, or to make its longest side across the ground `size`
+  let scale = def.scale;
+  if (def.size) {
+    const b = new THREE.Box3();
+    for (const m of meshes) { m.geometry.computeBoundingBox(); for (const w of copies(m)) b.union(m.geometry.boundingBox!.clone().applyMatrix4(w)); }
+    scale = def.size / Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
+  }
+  const frame = new THREE.Matrix4().makeRotationY(def.turn).multiply(new THREE.Matrix4().makeScale(scale, scale, scale));
+  const byMat = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  for (const m of meshes) {
     const mats = Array.isArray(m.material) ? m.material : [m.material];
     // (one material per mesh in these models; a multi-material mesh keeps its first)
     const mat = mats[0];
     if (!byMat.has(mat)) byMat.set(mat, []);
-    byMat.get(mat)!.push(g);
-  });
+    const base = floats(m.geometry);
+    for (const w of copies(m)) byMat.get(mat)!.push(base.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(frame, w)));
+  }
   const parts: Measured['parts'] = [];
   for (const [mat, gs] of byMat) {
     const keep = ['position', 'normal', 'uv'].filter((a) => gs.every((g) => g.getAttribute(a)));
@@ -71,8 +108,15 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   // ---- the measuring: every surface over each cell of a grid, top down ----
   // (each triangle sampled finely — walls and posts too, which rays from above would slip past — and each
   //  sample put in the cell under it with its height and how level the surface is)
-  const box = new THREE.Box3();
+  let box = new THREE.Box3();
   for (const p of parts) { p.geo.computeBoundingBox(); box.union(p.geo.boundingBox!); }
+  if (def.centre) {
+    // its middle over the origin, its foot on y = 0
+    const c = box.getCenter(new THREE.Vector3()), foot = def.ground !== undefined ? def.ground * scale : box.min.y;
+    for (const p of parts) { p.geo.translate(-c.x, -foot, -c.z); p.geo.computeBoundingSphere(); }
+    box = new THREE.Box3();
+    for (const p of parts) { p.geo.computeBoundingBox(); box.union(p.geo.boundingBox!); }
+  }
   const x0 = box.min.x, z0 = box.min.z;
   const nx = Math.ceil((box.max.x - x0) / GRID) || 1, nz = Math.ceil((box.max.z - z0) / GRID) || 1;
   const hits: { y: number; up: number }[][] = Array.from({ length: nx * nz }, () => []);
@@ -105,7 +149,12 @@ export function measure(root: THREE.Object3D, def: StructureDef): Measured {
   // refine: the mean of the surfaces within 5 cm of it
   { let s = 0, c = 0; for (const hs of hits) for (const h of hs) if (h.up > 0.92 && Math.abs(h.y - deck) < 0.06) { s += h.y; c++; } if (c) deck = s / c; }
   const cell = new Uint8Array(nx * nz), height = new Float32Array(nx * nz);
-  hits.forEach((hs, k) => {
+  if (def.solid) {
+    // a building: whatever stands above its foot is in the way (a threshold, a paving stone underfoot is not)
+    hits.forEach((hs, k) => { if (hs.some((h) => h.y > box.min.y + 0.25)) cell[k] = Cell.Block; });
+    // (its inside too: a closed ring of walls round empty floor)
+    fillInside(cell, nx, nz);
+  } else hits.forEach((hs, k) => {
     // (hits come nearest first: top down)
     let walk = 0, found = false;
     for (let n = 0; n < hs.length; n++) {
@@ -252,4 +301,70 @@ export class Placed {
     const a = this.m.outX[k], b = this.m.outZ[k];
     return [a * this.c + b * this.s, -a * this.s + b * this.c];
   }
+}
+
+/**
+ * A building's inside, in the way too: every empty cell that can't be reached from outside the grid — with
+ * the walls thickened a little while looking, so a doorway doesn't count as a way in (no going into houses
+ * that have nothing inside them).
+ */
+function fillInside(cell: Uint8Array, nx: number, nz: number): void {
+  const R = 3;
+  const wall = new Uint8Array(nx * nz);
+  for (let j = 0; j < nz; j++)
+    for (let i = 0; i < nx; i++) {
+      if (cell[j * nx + i] !== Cell.Block) continue;
+      for (let b = Math.max(0, j - R); b <= Math.min(nz - 1, j + R); b++)
+        for (let a = Math.max(0, i - R); a <= Math.min(nx - 1, i + R); a++) wall[b * nx + a] = 1;
+    }
+  const out = new Uint8Array(nx * nz), q: number[] = [];
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) if ((i === 0 || j === 0 || i === nx - 1 || j === nz - 1) && !wall[j * nx + i]) { out[j * nx + i] = 1; q.push(j * nx + i); }
+  while (q.length) {
+    const k = q.pop()!, i = k % nx, j = (k - i) / nx;
+    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+      if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+      const n = b * nx + a;
+      if (out[n] || wall[n]) continue;
+      out[n] = 1;
+      q.push(n);
+    }
+  }
+  // the thickening round the outside of the walls is outside too: a few steps in from what the fill reached
+  let front: number[] = [];
+  for (let k = 0; k < nx * nz; k++) if (out[k]) front.push(k);
+  for (let step = 0; step < R + 1; step++) {
+    const next: number[] = [];
+    for (const k of front) {
+      const i = k % nx, j = (k - i) / nx;
+      for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+        if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+        const n = b * nx + a;
+        if (out[n] || cell[n] !== Cell.Empty) continue;
+        out[n] = 1;
+        next.push(n);
+      }
+    }
+    front = next;
+  }
+  // what is left, walled in: the inside
+  for (let k = 0; k < nx * nz; k++) if (cell[k] === Cell.Empty && !out[k]) cell[k] = Cell.Block;
+}
+
+/**
+ * Downloaded models' materials, made fit for the tropical sun: many come marked as bare metal, polished, which
+ * a model viewer with no sky shows as painted wood and stone, but under the game's sky they mirror it and turn
+ * white. Only what is named metal keeps some metal; nothing is polished; the sky's reflection kept down.
+ */
+export function tame(mat: THREE.Material): void {
+  const m = mat as THREE.MeshStandardMaterial;
+  if (!m.isMeshStandardMaterial) return;
+  const metal = /metal|iron|steel|anvil|nail|hinge/i.test(m.name);
+  m.metalness = metal ? Math.min(m.metalness, 0.6) : Math.min(m.metalness, 0.05);
+  m.roughness = Math.max(m.roughness, metal ? 0.45 : 0.6);
+  m.envMapIntensity = 0.5;
+  // (see-through leaves, thatch, cloth: cut out rather than blended — blended, they sort badly among the rest)
+  if (m.transparent && m.opacity >= 0.99) { m.transparent = false; m.depthWrite = true; m.alphaTest = Math.max(m.alphaTest, 0.5); }
+  // (a metal-roughness texture would bring back the metal the numbers took away)
+  if (!metal) m.metalnessMap = null;
+  m.needsUpdate = true;
 }

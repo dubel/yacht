@@ -158,6 +158,19 @@ npx tsx tools/sim-turn.ts 3   # zwrotność
   „The Gorilla Tag Beach Dock” — KPMisParrot, wszystkie **CC-BY-4.0**, Sketchfab;
   „Dock House - Stylized Wooden Pier” — voyoo, **licencja Sketchfab Standard** (użycie w grze dozwolone, bez
   redystrybucji samego modelu — sprawdzić warunki przed komercjalizacją).
+- **Tortuga — miasteczko**, wersje zoptymalizowane w `public/assets/town/` (`npm run optimize-town`; oryginały
+  w `assets/tortuga/`), wszystkie z Sketchfab, **CC-BY-4.0** (poza jednym, niżej):
+  „Medieval Tavern” — Moonlightlll; „Middle Age Noble House” — Skodvirr; „Medieval Blacksmith” — Daniel;
+  „Game Ready Wooden House” — Rouge-Nation; „Medieval House” — Joan LP; „Medieval House” — Kroko.blend;
+  „Medieval House (again other)” — AspectStudios; „Medieval House (another)” — unrealmahin; „Wooden Cabin” — Fridge;
+  „Wooden Log Cabin” — donnichols; „Old Wooden Cabin / House” — Pigcraft; „Wooden Home” — Digital screen official;
+  „Wooden House 3D Model (game-ready environment)” — prabinpandey631; „Thatched Hut” — stealth86;
+  „Forest Hut (game ready)” — Gerhald; „Old Forest Hut” — PT34; „Broken House” — DoniTodorov;
+  „Pirate Wooden Shack” i „Low-Poly Medieval Wooden and Plaster Houses” — Chenuka Wijesundara; „Medieval” — Gunnar Correa;
+  „Medieval Tavern Asset Pack” — Matthew Theobald; „Medieval Tavern Table” — landout;
+  „Medieval Stone Well” — Pigcraft; „Medieval Market Stall” — AspectStudios; „Medieval Stall” — Cyril43;
+  „The Butcher's Table” — Azura_SQ; „Blacksmithing Tools” — Gnossiennes.
+  **„Outbuilding” — quizzes, licencja Sketchfab Standard** (jak „Dock House” — sprawdzić przed komercjalizacją).
 - **Clearwater** — © 2026 Lumaris (Aurélien), licencja **MIT** (`third_party/clearwater/LICENSE`).
   Z Clearwatera pochodzą: spektrum i GPU FFT, symulacja ripples, kaustyki z dyspersją, model optyczny wody
   (Fresnel, absorpcja/rozpraszanie, połysk Beckmanna z LEAN), filtr B-spline, post-processing

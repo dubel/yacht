@@ -37,3 +37,5 @@ assets/dock_pier.glb
 assets/low_poly_dock.glb
 assets/the_gorilla_tag_beach_dock.glb
 assets/rustic_wooden_dock.glb
+# source Tortuga town models (~1 GB) — the game uses public/assets/town (npm run optimize-town)
+assets/tortuga/
