@@ -28,7 +28,7 @@ export class Hud {
       '<kbd>Z</kbd> rzuć / podnieś kotwicę (przy brzegu, 3–28 m wody) &nbsp; na kotwicy: <kbd>B</kbd> szalupą na ląd i z powrotem',
       'na mieliźnie: <kbd>K</kbd> — wywieźć kotwicę i ściągnąć statek (kedżowanie)',
       '<kbd>N</kbd> pogoda &nbsp; <kbd>[</kbd>/<kbd>]</kbd> czas ∓1 h &nbsp; <kbd>P</kbd> stop czasu &nbsp; <kbd>M</kbd> dźwięk',
-      '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×6',
+      '<kbd>Tab</kbd> mapa &nbsp; (odkrywasz ją, płynąc) &nbsp; <kbd>−</kbd>/<kbd>+</kbd> tempo ×1–×12',
       '<kbd>F1</kbd> debug &nbsp; <kbd>F2</kbd>–<kbd>F6</kbd> widoki wody &nbsp; <kbd>F7</kbd> muzyka wł./wył. &nbsp; <kbd>F9</kbd> fauna wł./wył. &nbsp; <kbd>F10</kbd> przyrządy statku',
       '<span class="credit">muzyka: Kevin MacLeod (incompetech.com), CC BY 3.0</span>',
       '<span id="sndhint">🔊 kliknij lub naciśnij klawisz, aby włączyć dźwięk</span>',

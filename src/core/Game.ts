@@ -66,7 +66,7 @@ import { AudioSystem } from '../audio/AudioSystem';
 /** how much faster than real time the clouds move while the day clock runs (a 7-min day is ~200× faster) */
 const CLOUD_TIMELAPSE = 6;
 /** fast-travel multipliers (− / +) */
-const TRAVEL = [1, 1.5, 2, 4, 6];
+const TRAVEL = [1, 1.5, 2, 4, 6, 9, 12];
 
 const START_BEARING = THREE.MathUtils.degToRad(190);
 const VIEW_IDS: Record<ViewMode, number> = { final: 0, normals: 1, caustics: 2, reflection: 3, depth: 4, ripples: 5, fft: 6 };
@@ -638,7 +638,13 @@ export class Game {
     }
     {
       const o = body.origin, h = body.heading, bow = this.boat.info.hullBow;
-      this.leadsman.update(stepDt, o.x + Math.sin(h) * bow, o.z + Math.cos(h) * bow, h, body.speed * body.travel, this.kedge.state !== 'afloat' || body.grounded);
+      const bx = o.x + Math.sin(h) * bow, bz = o.z + Math.cos(h) * bow;
+      // (quiet, too, with nothing to warn of: the anchor down (the ship lies to it, swinging), the sailor
+      // ashore, the ship coming alongside in Tortuga's harbour — where the shallows ahead are the quay she
+      // is making for — or lying against a pier)
+      const quiet = this.kedge.state !== 'afloat' || body.grounded || this.anchor.state !== 'aweigh' || this.ashore
+        || body.alongside || this.tortuga.near(bx, bz, 40);
+      this.leadsman.update(stepDt, bx, bz, h, body.speed * body.travel, quiet);
     }
     if (this.fauna) {
       this.fish.update(stepDt, body.origin, body.origin, 1 - this.env.night);
