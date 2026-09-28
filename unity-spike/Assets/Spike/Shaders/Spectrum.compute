@@ -1,0 +1,55 @@
+// Port of src/render/water/WaterSpectrum.ts (Clearwater FFT ocean, MIT © 2026 Lumaris) as compute kernels:
+// H0 → time evolution → 2·log2(N) butterfly passes → resolve (h, dh/dx, dh/dz, |slope|²). Texel (x, y) =
+// three's (u, v) = world (x, z) in three coords.
+#pragma kernel Spec
+#pragma kernel Fft
+#pragma kernel Resolve
+
+int N;
+float T, L;
+int P, Horiz;
+Texture2D<float4> H0;
+Texture2D<float4> Src;
+RWTexture2D<float4> Dst;
+
+float2 cmul(float2 a, float2 b) { return float2(a.x * b.x - a.y * b.y, a.x * b.y + a.y * b.x); }
+
+[numthreads(8, 8, 1)]
+void Spec(uint3 id : SV_DispatchThreadID)
+{
+    float4 s = H0[id.xy];
+    float2 n = float2(id.xy);
+    n -= step(float(N / 2), n) * float(N);
+    float2 k = 6.28318530718 * n / L; float kl = length(k);
+    float w = sqrt(9.81 * kl + 7.4e-5 * kl * kl * kl);
+    float w0 = 6.28318530718 / 120.0; w = floor(w / w0) * w0;
+    float c = cos(w * T), sn = sin(w * T);
+    float2 H = cmul(s.xy, float2(c, sn)) + cmul(s.zw, float2(c, -sn));
+    float2 C1 = H - k.x * H;
+    float2 C2 = float2(-k.y * H.y, k.y * H.x);
+    Dst[id.xy] = float4(C1, C2);
+}
+
+[numthreads(8, 8, 1)]
+void Fft(uint3 id : SV_DispatchThreadID)
+{
+    int j = Horiz == 1 ? (int)id.x : (int)id.y;
+    int k = j & (P - 1);
+    int i = ((j - (j & (2 * P - 1))) >> 1) + k;
+    bool y1 = (j & P) != 0;
+    int2 a = Horiz == 1 ? int2(i, id.y) : int2(id.x, i);
+    int2 b = Horiz == 1 ? int2(i + N / 2, id.y) : int2(id.x, i + N / 2);
+    float4 x0 = Src[a], x1 = Src[b];
+    float ang = 3.14159265359 * float(k) / float(P);
+    float2 w = float2(cos(ang), sin(ang));
+    float4 wx = float4(cmul(w, x1.xy), cmul(w, x1.zw));
+    Dst[id.xy] = y1 ? x0 - wx : x0 + wx;
+}
+
+[numthreads(8, 8, 1)]
+void Resolve(uint3 id : SV_DispatchThreadID)
+{
+    float4 s = Src[id.xy];
+    float2 sl = float2(s.y, s.z);
+    Dst[id.xy] = float4(s.x, sl, dot(sl, sl));
+}

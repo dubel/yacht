@@ -1,0 +1,13 @@
+Library/
+Temp/
+Logs/
+Build/
+UserSettings/
+obj/
+*.csproj
+*.sln
+*.slnx
+# generated from the web game by tools/dev/export-*.{ts,mjs} and SpikeSetup.All
+Import/
+Assets/Generated/
+Assets/Generated.meta

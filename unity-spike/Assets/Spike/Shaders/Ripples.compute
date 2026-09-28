@@ -1,0 +1,67 @@
+// Port of src/render/water/Ripples.ts (Clearwater interactive ripples, MIT © 2026 Lumaris): a wave-equation
+// window that follows the boat, with the moving hull as a pressure disturbance and foam carried along.
+#pragma kernel Step
+#pragma kernel Norm
+
+int N;
+float2 Shift;
+float4 Drop;
+float K;
+float4 Hull;   // xy centre (uv), zw forward unit
+float3 HullS;  // x half-length (uv), y half-beam (uv), z strength
+float Time;
+float Texel;
+Texture2D<float4> Src;
+SamplerState sampler_linear_clamp;
+RWTexture2D<float4> Dst;
+
+float hash(float2 p) { float3 p3 = frac(float3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return frac((p3.x + p3.y) * p3.z); }
+float4 tex(float2 uv) { return Src.SampleLevel(sampler_linear_clamp, uv, 0); }
+
+[numthreads(8, 8, 1)]
+void Step(uint3 id : SV_DispatchThreadID)
+{
+    float2 px = 1.0 / float(N);
+    float2 vUv = (float2(id.xy) + 0.5) / float(N);
+    float2 uv = vUv + Shift;
+    float4 c = tex(uv);
+    float avg = 0.25 * (tex(uv + float2(px.x, 0)).r + tex(uv - float2(px.x, 0)).r + tex(uv + float2(0, px.y)).r + tex(uv - float2(0, px.y)).r);
+    float v = c.g + (avg - c.r) * K;
+    v *= 0.996;
+    float h = c.r + v;
+    h *= 0.9988;
+    float favg = 0.25 * (tex(uv + float2(px.x, 0)).b + tex(uv - float2(px.x, 0)).b + tex(uv + float2(0, px.y)).b + tex(uv - float2(0, px.y)).b);
+    float foam = lerp(c.b, favg, 0.1) * 0.9968;
+    if (Drop.w != 0.0) { float d = length(vUv - Drop.xy); float r = Drop.z; if (d < r) { float f = 0.5 + 0.5 * cos(3.14159 * d / r); h -= Drop.w * f; } }
+    if (HullS.z != 0.0)
+    {
+        float2 d = vUv - Hull.xy;
+        float2 q = float2(dot(d, Hull.zw), dot(d, float2(-Hull.w, Hull.z)));
+        float along = q.x / HullS.x, across = q.y / HullS.y;
+        float beam = 1.0 - 0.55 * max(along, 0.0) * max(along, 0.0);
+        float e = along * along + (across / beam) * (across / beam);
+        float bow = exp(-((along - 0.72) * (along - 0.72) * 22.0 + across * across * 2.5));
+        float stern = exp(-((along + 0.9) * (along + 0.9) * 22.0 + across * across * 2.5));
+        h -= HullS.z * (bow - 0.45 * stern);
+        float ring = smoothstep(1.35, 0.95, e) * smoothstep(0.55, 0.95, e);
+        float n = hash(floor(vUv * 512.0) + floor(Time * 30.0)) - 0.5;
+        h += HullS.z * 1.6 * ring * n;
+        float aft = smoothstep(-0.7, -0.95, along) * smoothstep(-1.45, -1.1, along) * smoothstep(1.0, 0.3, abs(across));
+        foam += HullS.z * (ring * (0.1 + 0.25 * max(along, 0.0)) + 1.25 * aft);
+    }
+    float2 e2 = min(vUv, 1.0 - vUv); float edge = smoothstep(0.0, 0.08, min(e2.x, e2.y));
+    h *= lerp(0.92, 1.0, edge); v *= lerp(0.92, 1.0, edge); foam *= edge;
+    if (uv.x < 0. || uv.y < 0. || uv.x > 1. || uv.y > 1.) { h = 0.; v = 0.; foam = 0.; }
+    Dst[id.xy] = float4(h, v, min(foam, 4.0), 1);
+}
+
+[numthreads(8, 8, 1)]
+void Norm(uint3 id : SV_DispatchThreadID)
+{
+    float2 px = 1.0 / float(N);
+    float2 vUv = (float2(id.xy) + 0.5) / float(N);
+    float r = tex(vUv + float2(px.x, 0)).r, l = tex(vUv - float2(px.x, 0)).r;
+    float u = tex(vUv + float2(0, px.y)).r, d = tex(vUv - float2(0, px.y)).r;
+    float4 c = tex(vUv);
+    Dst[id.xy] = float4(c.r, (r - l) / (2.0 * Texel), (u - d) / (2.0 * Texel), c.b);
+}
