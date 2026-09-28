@@ -5,7 +5,7 @@ import puppeteer from 'puppeteer-core';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 const query = process.argv[2] ?? '?weather=clear&time=10:30&pause&t=5';
-const out = 'unity-spike/Import';
+const out = process.env.UNITY_IMPORT ?? 'unity-spike/Import';
 mkdirSync(out, { recursive: true });
 const browser = await puppeteer.launch({ executablePath: '/usr/bin/google-chrome-stable', headless: true, protocolTimeout: 600000,
   args: ['--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=vulkan', '--enable-features=Vulkan', '--enable-unsafe-swiftshader'] });
