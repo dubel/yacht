@@ -9,17 +9,22 @@ using UnityEngine.Rendering.Universal;
 /// </summary>
 public class LagoonPost : ScriptableRendererFeature
 {
-    public Shader shader;
-    Material mat;
+    public Shader shader, underwaterShader;
+    Material mat, uwMat;
     PostPass pass;
 
     public static float exposure = 0.63f;
     public static float debug;
+    /// <summary>the lens may be under water: run the underwater pass before the post (Pipeline.ts step 4)</summary>
+    public static bool underwater;
+    public static Matrix4x4 invViewProj;
 
     public override void Create()
     {
         if (shader == null) shader = Shader.Find("Hidden/Spike/Post");
         if (shader != null) mat = CoreUtils.CreateEngineMaterial(shader);
+        if (underwaterShader == null) underwaterShader = Shader.Find("Hidden/Spike/Underwater");
+        if (underwaterShader != null) uwMat = CoreUtils.CreateEngineMaterial(underwaterShader);
         pass = new PostPass { renderPassEvent = RenderPassEvent.BeforeRenderingPostProcessing, requiresIntermediateTexture = true };
     }
 
@@ -27,20 +32,22 @@ public class LagoonPost : ScriptableRendererFeature
     {
         if (mat == null || !renderingData.cameraData.camera.CompareTag("MainCamera")) return;
         pass.mat = mat;
+        pass.uwMat = uwMat;
         renderer.EnqueuePass(pass);
     }
 
-    protected override void Dispose(bool disposing) => CoreUtils.Destroy(mat);
+    protected override void Dispose(bool disposing) { CoreUtils.Destroy(mat); CoreUtils.Destroy(uwMat); }
 
     class PostPass : ScriptableRenderPass
     {
-        public Material mat;
+        public Material mat, uwMat;
 
         class Data
         {
             public Material mat;
             public int pass;
-            public TextureHandle src, hdr, b1, b2;
+            public TextureHandle src, hdr, b1, b2, depth;
+            public Matrix4x4 invVP;
             public Vector4 srcSize, b2Size;
             public Vector2 dir;
             public float k;
@@ -94,6 +101,25 @@ public class LagoonPost : ScriptableRendererFeature
             var b2 = Tex("_PostB2", ew, eh);
             var b2t = Tex("_PostB2t", ew, eh);
             var outTex = Tex("_PostOut", w, h);
+
+            if (underwater && uwMat != null && res.cameraDepthTexture.IsValid())
+            {
+                var uw = Tex("_Underwater", w, h);
+                using (var b = rg.AddRasterRenderPass<Data>("Underwater", out var d))
+                {
+                    d.mat = uwMat; d.src = hdr; d.depth = res.cameraDepthTexture; d.invVP = invViewProj;
+                    b.UseTexture(hdr); b.UseTexture(res.cameraDepthTexture);
+                    b.SetRenderAttachment(uw, 0);
+                    b.SetRenderFunc((Data x, RasterGraphContext ctx) =>
+                    {
+                        x.mpb.SetTexture("_Scene", x.src);
+                        x.mpb.SetTexture("_SceneDepth", x.depth);
+                        x.mpb.SetMatrix("_InvVP", x.invVP);
+                        ctx.cmd.DrawProcedural(Matrix4x4.identity, x.mat, 0, MeshTopology.Triangles, 3, 1, x.mpb);
+                    });
+                }
+                hdr = uw;
+            }
 
             Blit(rg, "Post bright", 0, hdr, Size(w, h), qA);
             Blit(rg, "Post blur h", 1, qA, Size(qw, qh), qB, new Vector2(1, 0));

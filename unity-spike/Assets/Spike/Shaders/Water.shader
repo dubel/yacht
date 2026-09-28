@@ -1,7 +1,7 @@
 // Port of src/render/water/WaterSurface.ts (Clearwater's water model, MIT © 2026 Lumaris, adapted to a mesh):
 // camera-centred radial grid displaced by the shared Gerstner waves + FFT + wake height; shaded with Fresnel,
 // planar reflection, refraction through the real water thickness (URP opaque colour + depth), in-scatter,
-// LEAN glints, suspended specks, foam and haze. Seen-from-below branch left out (the spike stays above water).
+// LEAN glints, suspended specks, foam and haze; from below: Snell's window and total internal reflection.
 // All maths in three.js coordinates (Spike.hlsl) so it matches the web version pattern for pattern.
 Shader "Spike/Water"
 {
@@ -120,6 +120,40 @@ Shader "Spike/Water"
                 slope += _Chop * 0.13 * exp(-ldist * 0.04) * MulM2T(Cm.yz);
                 float var = _Chop * _Chop * (max(A.w - dot(A.yz, A.yz), 0.0) + WB * WB * max(B.w - dot(B.yz, B.yz), 0.0));
                 float3 n = normalize(float3(-slope.x, 1.0, -slope.y));
+
+                // ---- seen from below: Snell's window, total internal reflection outside it ----
+                if (camT.y < P.y)
+                {
+                    float3 nd = -n;
+                    float ci = max(dot(nd, v), 0.0);
+                    float3 sunTu = RefractGL(-uSunDir, float3(0, 1, 0), 1.0 / WATER_IOR);
+                    float Tsu = 1.0 - FresnelDielectric(uSunDir.y, WATER_IOR);
+                    // water-column radiance arriving along a direction (single scattering, HG toward the sun)
+                    #define COLUMN(dir) (WATER_SIG_S / WATER_SIG_T * 3.2 * (uSunRad * Tsu * exp(-WATER_SIG_T * 1.5 / max(-sunTu.y, 0.2)) * ((1.0 - 0.64) / (4.0 * PI_F * pow(1.64 - 1.6 * dot(dir, -sunTu), 1.5)) * 0.18 + 0.03) + _SkyIrr * exp(-WATER_SIG_A * 1.8) / (4.0 * PI_F)))
+                    float3 deep = COLUMN(wd);
+                    float3 trU = RefractGL(wd, nd, WATER_IOR);
+                    float Fu = 1.0;
+                    float3 through = 0;
+                    if (dot(trU, trU) > 1e-4)
+                    {
+                        Fu = FresnelDielectric(ci, 1.0 / WATER_IOR);
+                        float3 far = FromThree(P + trU * 400.0);
+                        float4 fc2 = mul(UNITY_MATRIX_VP, float4(far, 1.0));
+                        float2 tuv = ComputeNormalizedDeviceCoordinates(far, UNITY_MATRIX_VP);
+                        bool onScr = fc2.w > 0.0 && all(tuv > 0.0) && all(tuv < 1.0);
+                        through = onScr ? SampleSceneColor(tuv) : _FogColor;
+                        through += uSunRad * 60.0 * pow(max(dot(trU, uSunDir), 0.0), 3000.0);
+                    }
+                    float tilt = dot(slope, normalize(sunTu.xz + 1e-4));
+                    float3 mirror = COLUMN(reflect(wd, nd)) * (0.55 + 0.7 * smoothstep(-0.12, 0.12, tilt));
+                    float3 colU = Fu * mirror + (1.0 - Fu) * through;
+                    float cellsU = VNoise(P.xz * 1.3 + 7.0) * 0.6 + VNoise(P.xz * 4.1 - _SpikeTime * 0.15) * 0.4;
+                    float cov = clamp(R.a * 0.8, 0.0, 0.92);
+                    float foamU = ripIn * smoothstep(1.0 - cov, 1.1 - cov, cellsU) * saturate(R.a);
+                    colU = lerp(colU, uSunRad * Tsu * 0.12 + deep, foamU * 0.7);
+                    if (_View == 1) colU = n * 0.5 + 0.5;
+                    return float4(max(colU, 0.0), 1.0);
+                }
 
                 float nv = dot(n, v);
                 if (nv < 0.02) { n = normalize(n + v * (0.02 - nv)); nv = dot(n, v); }

@@ -19,6 +19,7 @@ public class Lagoon : MonoBehaviour
     public Texture2D h0;
     public ComputeShader spectrumCS, ripplesCS;
     public Shader causticsShader, postShader;
+    public Material particlesMaterial;
     public Material waterMaterial;
     public Camera cam;
     public Light sun;
@@ -286,6 +287,7 @@ public class Lagoon : MonoBehaviour
     void LateUpdate()
     {
         UpdateCamera(Time.deltaTime);
+        Underwater();
         RenderReflection(Mathf.RoundToInt(cam.pixelWidth * scale), Mathf.RoundToInt(cam.pixelHeight * scale));
 
         var tex = Shader.PropertyToID("_Surf");
@@ -318,6 +320,25 @@ public class Lagoon : MonoBehaviour
         }
     }
 
+    /// <summary>how far the lens is below the surface decides the underwater pass and the specks (Game.ts)</summary>
+    void Underwater()
+    {
+        var cp = ToThreeV(cam.transform.position);
+        float submerged = waves.Sample(cp.x, cp.z, time, out _) - cp.y;
+        LagoonPost.underwater = submerged > -1.2f;
+        var vp = GL.GetGPUProjectionMatrix(cam.projectionMatrix, true) * cam.worldToCameraMatrix;
+        LagoonPost.invViewProj = vp.inverse;
+        if (submerged > -1.5f && particlesMaterial != null)
+            Graphics.RenderPrimitives(new RenderParams(particlesMaterial) { camera = cam, worldBounds = new Bounds(cam.transform.position, Vector3.one * 100), layer = 4 },
+                MeshTopology.Triangles, 2500 * 6);
+    }
+
+    static Vector3 ToThreeV(Vector3 u) => new Vector3(u.x, u.y, -u.z);
+
+    /// <summary>terrain height at three (x, z) from the terrain colliders</summary>
+    static float Ground(float x, float z) =>
+        Physics.Raycast(new Vector3(x, 500, -z), Vector3.down, out var hit, 1000) ? hit.point.y : -50;
+
     void UpdateCamera(float dt)
     {
         cam.fieldOfView = 55; cam.nearClipPlane = 0.3f; cam.farClipPlane = 40000;
@@ -340,13 +361,22 @@ public class Lagoon : MonoBehaviour
             float wheel = mouse.scroll.ReadValue().y;
             if (wheel != 0) distance = Mathf.Clamp(distance * Mathf.Pow(1.1f, -Mathf.Sign(wheel)), 9, 160);
         }
+        var kbc = Keyboard.current;
+        if (kbc != null && kbc.vKey.wasPressedThisFrame)
+        {
+            if (pitch > -0.1f) { pitch = -0.3f; distance = Mathf.Min(distance, 32); }
+            else pitch = 0.28f;
+        }
         float dh = Mathf.DeltaAngle(headingYaw * Mathf.Rad2Deg, heading * Mathf.Rad2Deg) * Mathf.Deg2Rad;
         headingYaw += dh * (1 - Mathf.Exp(-dt * 0.8f));
         var focus = new Vector3(boatPos.x, 0, boatPos.y);
         camTarget = camFirst ? focus : Vector3.Lerp(camTarget, focus, 1 - Mathf.Exp(-dt * 6));
         float a = headingYaw + Mathf.PI + yaw, cp = Mathf.Cos(pitch);
         var want = new Vector3(camTarget.x + Mathf.Sin(a) * cp * distance, camTarget.y + Mathf.Sin(pitch) * distance + 3, camTarget.z + Mathf.Cos(a) * cp * distance);
+        float floor = Ground(want.x, want.z) + 1.2f;
+        want.y = Mathf.Max(want.y, floor);
         camSmooth = camFirst ? want : Vector3.Lerp(camSmooth, want, 1 - Mathf.Exp(-dt * 8));
+        camSmooth.y = Mathf.Max(camSmooth.y, floor);
         camFirst = false;
         float aimY = Mathf.Lerp(4, -1.2f, Mathf.SmoothStep(0, 1, Mathf.InverseLerp(0.02f, 0.3f, -pitch)));
         var pU = SpikeState.U(new[] { camSmooth.x, camSmooth.y, camSmooth.z });

@@ -78,6 +78,7 @@ public static class SpikeSetup
         var post = ScriptableObject.CreateInstance<LagoonPost>();
         post.name = "LagoonPost";
         post.shader = Shader.Find("Hidden/Spike/Post");
+        post.underwaterShader = Shader.Find("Hidden/Spike/Underwater");
         AssetDatabase.AddObjectToAsset(post, rd);
         rd.rendererFeatures.Add(post);
         var map = typeof(ScriptableRendererData).GetField("m_RendererFeatureMap", BindingFlags.NonPublic | BindingFlags.Instance);
@@ -210,6 +211,38 @@ public static class SpikeSetup
         return m;
     }
 
+    /// <summary>glTFast's materials → Spike/Hull (same inputs, plus the underwater light patch)</summary>
+    static void HullMaterials(GameObject model)
+    {
+        string dir = Gen + "/HullMaterials";
+        AssetDatabase.DeleteAsset(dir);
+        Directory.CreateDirectory(dir);
+        var hull = Shader.Find("Spike/Hull");
+        var made = new System.Collections.Generic.Dictionary<Material, Material>();
+        foreach (var r in model.GetComponentsInChildren<Renderer>())
+        {
+            var mats = r.sharedMaterials;
+            for (int i = 0; i < mats.Length; i++)
+            {
+                var src = mats[i];
+                if (src == null) continue;
+                if (!made.TryGetValue(src, out var m))
+                {
+                    m = new Material(hull) { name = src.name };
+                    foreach (var t in new[] { "baseColorTexture", "normalTexture" })
+                        if (src.HasProperty(t)) { m.SetTexture(t, src.GetTexture(t)); m.SetTextureScale(t, src.GetTextureScale(t)); m.SetTextureOffset(t, src.GetTextureOffset(t)); }
+                    foreach (var f in new[] { "normalTexture_scale", "metallicFactor", "roughnessFactor" })
+                        if (src.HasProperty(f)) m.SetFloat(f, src.GetFloat(f));
+                    if (src.HasProperty("baseColorFactor")) m.SetColor("baseColorFactor", src.GetColor("baseColorFactor"));
+                    AssetDatabase.CreateAsset(m, $"{dir}/{made.Count:D2}_{src.name}.mat");
+                    made[src] = m;
+                }
+                mats[i] = m;
+            }
+            r.sharedMaterials = mats;
+        }
+    }
+
     static void BuildScene()
     {
         var scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
@@ -252,6 +285,7 @@ public static class SpikeSetup
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = terrainMat;
             mr.shadowCastingMode = ShadowCastingMode.Off;
+            go.AddComponent<MeshCollider>().sharedMesh = mesh; // the chase camera keeps off the seabed
             go.isStatic = true;
         }
 
@@ -263,6 +297,7 @@ public static class SpikeSetup
             model.transform.SetParent(boat.transform, false);
             // glTFast mirrors x; our world mirrors z → the model turned half round about y (see Lagoon.cs)
             model.transform.localRotation = Quaternion.Euler(0, 180, 0);
+            HullMaterials(model);
             foreach (var r in model.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = ShadowCastingMode.On;
         }
         else Debug.LogError("[spike] boat.glb did not import");
@@ -276,6 +311,9 @@ public static class SpikeSetup
         lagoon.causticsShader = Shader.Find("Hidden/Spike/Caustics");
         lagoon.postShader = Shader.Find("Hidden/Spike/Post");
         lagoon.waterMaterial = waterMat;
+        var partMat = Mat(Spike + "/Particles.mat", "Spike/Particles");
+        EditorUtility.SetDirty(partMat);
+        lagoon.particlesMaterial = partMat;
         lagoon.cam = cam;
         lagoon.sun = sun;
         lagoon.boat = boat.transform;
